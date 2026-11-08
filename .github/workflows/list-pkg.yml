@@ -1,0 +1,17 @@
+name: Inspect Packages
+
+on:
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: read
+    steps:
+      - name: List packages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api /orgs/libretechio/packages?package_type=container || true
+          gh api /user/packages?package_type=container || true
