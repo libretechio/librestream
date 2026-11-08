@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { resolve, extname } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 
@@ -270,5 +270,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const config = process.env.LIBRESTREAM_ADDONS_FILE;
   const addons = config ? JSON.parse(await readFile(config, 'utf8')) : [{name:'Cinemeta', url:'https://v3-cinemeta.strem.io/manifest.json'}];
   for (const a of addons) if (new URL(a.url).protocol !== 'https:') throw Error('Addon URLs must use HTTPS');
-  createApp({addons, devIdentity:process.env.LIBRESTREAM_DEV_IDENTITY === '1'}).listen(Number(process.env.PORT || 4173), process.env.HOST || '127.0.0.1', () => console.log('LibreStream ready'));
+  // Static files sit next to this file, not in the process working directory.
+  const root = resolve(fileURLToPath(new URL('.', import.meta.url)), 'build');
+  createApp({addons, root, devIdentity:process.env.LIBRESTREAM_DEV_IDENTITY === '1'}).listen(Number(process.env.PORT || 4173), process.env.HOST || '127.0.0.1', () => console.log('LibreStream ready'));
 }
