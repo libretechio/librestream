@@ -1,0 +1,178 @@
+/* LibreStream Color Palettes mapped to Astryx design tokens */
+
+:root,
+[data-palette="libre-sand"] {
+  --color-background-body: #111315;
+  --color-background-surface: #1b1e22;
+  --color-background-card: #24282d;
+  --color-background-popover: #24282d;
+  --color-background-muted: #16181b;
+  --color-accent: var(--ls-accent, #edc894);
+  --color-accent-muted: #3e444b;
+  --color-text-primary: #f4f3ef;
+  --color-text-secondary: #b3b7bd;
+  --color-text-accent: var(--ls-accent, #edc894);
+  --color-border: #ffffff18;
+  --color-border-emphasized: #3e444b;
+  --ls-accent: #edc894;
+}
+
+[data-palette="neutral"] {
+  --color-background-body: #151719;
+  --color-background-surface: #202428;
+  --color-background-card: #272c32;
+  --color-background-popover: #272c32;
+  --color-background-muted: #1a1d20;
+  --color-accent: var(--ls-accent, #bfc5cf);
+  --color-accent-muted: #454c55;
+  --color-text-primary: #f2f3ed;
+  --color-text-secondary: #9aa1ab;
+  --color-text-accent: var(--ls-accent, #bfc5cf);
+  --color-border: #ffffff1c;
+  --color-border-emphasized: #454c55;
+  --ls-accent: #bfc5cf;
+}
+
+[data-palette="sea-glass"] {
+  --color-background-body: #101618;
+  --color-background-surface: #182226;
+  --color-background-card: #202d33;
+  --color-background-popover: #202d33;
+  --color-background-muted: #131c20;
+  --color-accent: var(--ls-accent, #a5d4c2);
+  --color-accent-muted: #354a4f;
+  --color-text-primary: #e4edea;
+  --color-text-secondary: #98aca5;
+  --color-text-accent: var(--ls-accent, #a5d4c2);
+  --color-border: #ffffff18;
+  --color-border-emphasized: #354a4f;
+  --ls-accent: #a5d4c2;
+}
+
+[data-palette="nord"] {
+  --color-background-body: #242933;
+  --color-background-surface: #2e3440;
+  --color-background-card: #3b4252;
+  --color-background-popover: #3b4252;
+  --color-background-muted: #2b313d;
+  --color-accent: var(--ls-accent, #88c0d0);
+  --color-accent-muted: #434c5e;
+  --color-text-primary: #eceff4;
+  --color-text-secondary: #d8dee9;
+  --color-text-accent: var(--ls-accent, #88c0d0);
+  --color-border: #434c5e;
+  --color-border-emphasized: #4c566a;
+  --ls-accent: #88c0d0;
+}
+
+[data-palette="catppuccin-mocha"] {
+  --color-background-body: #181825;
+  --color-background-surface: #1e1e2e;
+  --color-background-card: #313244;
+  --color-background-popover: #313244;
+  --color-background-muted: #11111b;
+  --color-accent: var(--ls-accent, #cba6f7);
+  --color-accent-muted: #45475a;
+  --color-text-primary: #cdd6f4;
+  --color-text-secondary: #a6adc8;
+  --color-text-accent: var(--ls-accent, #cba6f7);
+  --color-border: #313244;
+  --color-border-emphasized: #45475a;
+  --ls-accent: #cba6f7;
+}
+
+[data-palette="catppuccin-macchiato"] {
+  --color-background-body: #1e2030;
+  --color-background-surface: #24273a;
+  --color-background-card: #363a4f;
+  --color-background-popover: #363a4f;
+  --color-background-muted: #181926;
+  --color-accent: var(--ls-accent, #c6a0f6);
+  --color-accent-muted: #494d64;
+  --color-text-primary: #cad3f5;
+  --color-text-secondary: #a5adcb;
+  --color-text-accent: var(--ls-accent, #c6a0f6);
+  --color-border: #363a4f;
+  --color-border-emphasized: #494d64;
+  --ls-accent: #c6a0f6;
+}
+
+[data-palette="catppuccin-frappe"] {
+  --color-background-body: #292c3c;
+  --color-background-surface: #303446;
+  --color-background-card: #414559;
+  --color-background-popover: #414559;
+  --color-background-muted: #232634;
+  --color-accent: var(--ls-accent, #ca9ee6);
+  --color-accent-muted: #51576d;
+  --color-text-primary: #c6d0f5;
+  --color-text-secondary: #a5adce;
+  --color-text-accent: var(--ls-accent, #ca9ee6);
+  --color-border: #414559;
+  --color-border-emphasized: #51576d;
+  --ls-accent: #ca9ee6;
+}
+
+[data-palette="catppuccin-latte"] {
+  --color-background-body: #e6e9ef;
+  --color-background-surface: #eff1f5;
+  --color-background-card: #e6e9ef;
+  --color-background-popover: #eff1f5;
+  --color-background-muted: #dce0e8;
+  --color-accent: var(--ls-accent, #8839ef);
+  --color-accent-muted: #ccd0da;
+  --color-text-primary: #4c4f69;
+  --color-text-secondary: #6c6f85;
+  --color-text-accent: var(--ls-accent, #8839ef);
+  --color-border: #ccd0da;
+  --color-border-emphasized: #bcc0cc;
+  --ls-accent: #8839ef;
+}
+
+[data-palette="tokyo-night"] {
+  --color-background-body: #16161e;
+  --color-background-surface: #1a1b26;
+  --color-background-card: #24283b;
+  --color-background-popover: #24283b;
+  --color-background-muted: #13141c;
+  --color-accent: var(--ls-accent, #7aa2f7);
+  --color-accent-muted: #292e42;
+  --color-text-primary: #c0caf5;
+  --color-text-secondary: #9aa5ce;
+  --color-text-accent: var(--ls-accent, #7aa2f7);
+  --color-border: #292e42;
+  --color-border-emphasized: #3b4261;
+  --ls-accent: #7aa2f7;
+}
+
+[data-palette="tokyo-night-storm"] {
+  --color-background-body: #1f2335;
+  --color-background-surface: #24283b;
+  --color-background-card: #292e42;
+  --color-background-popover: #292e42;
+  --color-background-muted: #1a1d2c;
+  --color-accent: var(--ls-accent, #7aa2f7);
+  --color-accent-muted: #3b4261;
+  --color-text-primary: #c0caf5;
+  --color-text-secondary: #9aa5ce;
+  --color-text-accent: var(--ls-accent, #7aa2f7);
+  --color-border: #3b4261;
+  --color-border-emphasized: #545c7e;
+  --ls-accent: #7aa2f7;
+}
+
+[data-palette="dracula"] {
+  --color-background-body: #1e1f29;
+  --color-background-surface: #282a36;
+  --color-background-card: #343746;
+  --color-background-popover: #343746;
+  --color-background-muted: #191a21;
+  --color-accent: var(--ls-accent, #bd93f9);
+  --color-accent-muted: #44475a;
+  --color-text-primary: #f8f8f2;
+  --color-text-secondary: #9ea7c4;
+  --color-text-accent: var(--ls-accent, #bd93f9);
+  --color-border: #44475a;
+  --color-border-emphasized: #6272a4;
+  --ls-accent: #bd93f9;
+}
