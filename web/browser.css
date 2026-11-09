@@ -1119,16 +1119,14 @@ body {
 
 .nuvio-episode-card {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  align-items: stretch;
+  gap: 0.4rem;
   width: 100%;
-  padding: 0.55rem;
+  padding: 0.5rem;
   border-radius: 0.75rem;
   background: var(--color-background-card);
   border: 1px solid var(--color-border);
   color: var(--color-text-primary);
-  text-align: start;
-  cursor: pointer;
   transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
@@ -1136,6 +1134,50 @@ body {
 .nuvio-episode-card.active {
   border-color: var(--color-accent);
   background: color-mix(in srgb, var(--color-accent) 12%, var(--color-background-card));
+}
+
+.episode-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+  border-radius: 0.5rem;
+}
+
+.episode-main:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.episode-play-btn {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-accent);
+  color: var(--color-on-accent, #111111);
+  border: none;
+  cursor: pointer;
+}
+
+.episode-play-btn:hover {
+  filter: brightness(1.08);
+}
+
+.episode-play-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
 }
 
 .episode-thumb-box {
@@ -1583,6 +1625,9 @@ body {
 
 .player-top-content {
   width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 .player-title-block {
@@ -1763,44 +1808,206 @@ body {
   gap: 0.65rem;
 }
 
-.player-panel-drawer {
+/* Playback sheet: one surface for audio, subtitles, quality and speed. */
+.player-tracks-sheet {
   position: absolute;
-  top: 4.25rem;
+  top: 4.5rem;
   right: 1rem;
-  width: min(90vw, 20rem);
-  max-height: calc(100dvh - 9.5rem);
-  background: rgba(20, 22, 28, 0.96);
-  backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  width: min(92vw, 22rem);
+  max-height: calc(100dvh - 9rem);
+  background: rgba(16, 17, 21, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 0.85rem;
   z-index: 30;
-  padding: 1rem;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-.panel-header {
+.sheet-head {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-  padding-bottom: 0.6rem;
-  margin-bottom: 0.6rem;
+  padding: 0.85rem 0.9rem 0.6rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.panel-item {
-  width: 100%;
-  padding: 0.6rem 0.8rem;
-  border-radius: 0.45rem;
-  background: transparent;
-  border: none;
+.sheet-head h4 {
   color: #fff;
-  text-align: start;
-  font-size: 0.88rem;
+  font-size: 0.95rem;
+}
+
+.sheet-tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.track-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.4rem 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.72);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
   cursor: pointer;
 }
 
-.panel-item.active {
+.track-tab svg {
+  width: 14px;
+  height: 14px;
+}
+
+.track-tab.active {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.sheet-body {
+  overflow-y: auto;
+  padding: 0.75rem 0.9rem 1rem;
+}
+
+.sheet-group + .sheet-group {
+  margin-top: 1.1rem;
+}
+
+.sheet-group-title {
+  display: block;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 0.35rem;
+}
+
+.sheet-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.5rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: #fff;
+  text-align: start;
+  cursor: pointer;
+}
+
+.sheet-row:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.sheet-row.active {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.sheet-row:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.sheet-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.sheet-row-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.sheet-row-sub {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.sheet-check {
+  color: var(--color-accent);
+  flex: 0 0 auto;
+}
+
+.sheet-note {
+  margin: 0.3rem 0 0.1rem;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.sheet-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-top: 0.7rem;
+}
+
+.sheet-inline-label {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.sheet-segmented {
+  display: inline-flex;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.4rem;
+  overflow: hidden;
+}
+
+.segmented-option {
+  padding: 0.45rem 0.7rem;
+  min-height: 2.5rem;
+  font-size: 0.72rem;
+  text-transform: capitalize;
+  color: rgba(255, 255, 255, 0.72);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.segmented-option.active {
   background: var(--color-accent);
   color: var(--color-on-accent, #111111);
   font-weight: 700;
+}
+
+.ls-video-canvas::cue {
+  font-size: var(--ls-cue-size, 1.05em);
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+}
+
+.mpv-btn.has-badge {
+  position: relative;
+}
+
+.mpv-count {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.2rem;
+  min-width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 0.5rem;
+  background: var(--color-accent);
+  color: var(--color-on-accent, #111111);
+  font-size: 0.6rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .player-buffering-indicator {
@@ -1854,6 +2061,39 @@ body {
    RESPONSIVE BREAKPOINTS (Tablet >= 640px, Desktop >= 768px, Wide >= 1200px)
    ========================================================================= */
 @media (max-width: 39.999rem) {
+  /* Phone: the dock keeps play, skip, subtitles and fullscreen; the rest lives in the sheet. */
+  .mpv-volume-group,
+  .mpv-btn.speed-btn,
+  .mpv-btn[aria-label="Picture in picture"],
+  .mpv-count {
+    display: none;
+  }
+
+  .player-mpv-dock {
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    width: calc(100% - 1rem);
+  }
+
+  .player-mpv-pill {
+    padding: 0.5rem 0.65rem 0.6rem;
+  }
+
+  .mpv-controls-row {
+    gap: 0.25rem;
+  }
+
+  .mpv-timecode {
+    font-size: 0.72rem !important;
+  }
+
+  .player-tracks-sheet {
+    top: 3.75rem;
+    right: 0.5rem;
+    left: 0.5rem;
+    width: auto;
+    max-height: calc(100dvh - 12rem);
+  }
+
   .hero-actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

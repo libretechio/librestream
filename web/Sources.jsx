@@ -13,6 +13,46 @@ import { resource, supports, safeURL, sourceLabel } from './api';
 import { streamInfo, filterStreams, parseStreamMeta } from './streams';
 import { selectBestStream, waitForSources } from './autoSelect.js';
 
+// Rankings are warmed as soon as sources arrive, so Play does not start the probing.
+const rankCache = new Map();
+const rankPending = new Map();
+const RANK_TTL = 10 * 60 * 1000;
+
+const canPlayTypeFor = () => {
+  const video = document.createElement('video');
+  return (type) => video.canPlayType(type);
+};
+
+function cachedRanking(key) {
+  const entry = rankCache.get(key);
+  if (!entry || Date.now() - entry.at > RANK_TTL) return null;
+  return entry.ranked;
+}
+
+export function clearRankingCache() {
+  rankCache.clear();
+  rankPending.clear();
+}
+
+function rankSources(key, rows, meta, onStatus) {
+  if (rankPending.has(key)) return rankPending.get(key);
+  const controller = new AbortController();
+  const pending = selectBestStream(rows, {
+    meta,
+    signal: controller.signal,
+    saveData: Boolean(navigator.connection?.saveData),
+    canPlayType: canPlayTypeFor(),
+    onStatus
+  })
+    .then((ranked) => {
+      rankCache.set(key, { ranked, at: Date.now() });
+      return ranked;
+    })
+    .finally(() => rankPending.delete(key));
+  rankPending.set(key, pending);
+  return pending;
+}
+
 export function Sources({ addons, meta, videoId, onPlay, autoStart = false, initialPicker = false, onSelectingChange, addonsLoading = false }) {
   const [rows, setRows] = useState([]);
   const [pending, setPending] = useState(0);
@@ -23,12 +63,15 @@ export function Sources({ addons, meta, videoId, onPlay, autoStart = false, init
   const [showPicker, setShowPicker] = useState(initialPicker);
   const [selecting, setSelecting] = useState(false);
   const [selectionStatus, setSelectionStatus] = useState('');
+  const [rankState, setRankState] = useState('idle');
   const discoveryRef = useRef(null);
   const selectionRef = useRef(null);
   const stateRef = useRef({ rows, pending, meta });
   stateRef.current = { rows, pending: pending + (addonsLoading ? 1 : 0), meta };
   const onPlayRef = useRef(onPlay);
   onPlayRef.current = onPlay;
+
+  const rankingKey = `${meta.type}:${videoId}:${rows.length}`;
 
   useEffect(() => {
     const run = { controller: new AbortController(), queried: new Set() };
@@ -38,6 +81,7 @@ export function Sources({ addons, meta, videoId, onPlay, autoStart = false, init
     setFailed(0);
     setSelecting(false);
     setSelectionStatus('');
+    setRankState('idle');
     setShowPicker(initialPicker);
     stateRef.current = { rows: [], pending: 1, meta };
     return () => {
@@ -70,24 +114,42 @@ export function Sources({ addons, meta, videoId, onPlay, autoStart = false, init
     setShowPicker(true);
   };
 
+  // Warm the ranking while the user is still looking at the source list.
+  useEffect(() => {
+    if (pending > 0 || !rows.length) return;
+    if (cachedRanking(rankingKey)) {
+      setRankState('ready');
+      return;
+    }
+    let active = true;
+    setRankState('ranking');
+    rankSources(rankingKey, rows, stateRef.current.meta)
+      .then((ranked) => {
+        if (!active) return;
+        setRankState(ranked.length ? 'ready' : 'failed');
+      })
+      .catch(() => { if (active) setRankState('failed'); });
+    return () => { active = false; };
+  }, [pending, rows, rankingKey]);
+
   const playAutomatically = async () => {
     selectionRef.current?.abort();
     const controller = new AbortController();
     selectionRef.current = controller;
     setSelecting(true);
-    setSelectionStatus('Finding responsive sources…');
     try {
-      const video = document.createElement('video');
-      const available = await waitForSources(() => stateRef.current, { signal: controller.signal, canPlayType: type => video.canPlayType(type) });
-      const ranked = await selectBestStream(available, {
-        meta: stateRef.current.meta,
-        signal: controller.signal,
-        saveData: Boolean(navigator.connection?.saveData),
-        canPlayType: type => video.canPlayType(type),
-        onStatus: setSelectionStatus
-      });
+      let ranked = cachedRanking(rankingKey);
+      if (!ranked) {
+        setSelectionStatus('Checking sources for your connection…');
+        const available = await waitForSources(() => stateRef.current, {
+          signal: controller.signal,
+          canPlayType: canPlayTypeFor()
+        });
+        if (controller.signal.aborted) return;
+        ranked = await rankSources(rankingKey, available, stateRef.current.meta, setSelectionStatus);
+      }
       if (controller.signal.aborted) return;
-      if (!ranked.length) {
+      if (!ranked?.length) {
         setShowPicker(true);
         setSelectionStatus('No source passed the connection check. Choose a stream below or refresh sources.');
         return;
@@ -95,7 +157,13 @@ export function Sources({ addons, meta, videoId, onPlay, autoStart = false, init
       const viable = ranked.some(row => row.fits) ? ranked.filter(row => row.fits) : ranked.slice(0, 1);
       const streams = viable.map(row => ({
         ...row.stream,
-        autoSelection: { addon: row.a.name, resolution: row.info.resolution, mbps: row.measurement.mbps, ttfbMs: row.measurement.ttfbMs, saveData: Boolean(navigator.connection?.saveData) }
+        autoSelection: {
+          addon: row.a.name,
+          resolution: row.info.resolution,
+          mbps: row.measurement.mbps,
+          ttfbMs: row.measurement.ttfbMs,
+          saveData: Boolean(navigator.connection?.saveData)
+        }
       }));
       onPlayRef.current(streams[0], { alternatives: streams.slice(1) });
     } catch {
@@ -133,7 +201,16 @@ export function Sources({ addons, meta, videoId, onPlay, autoStart = false, init
       </HStack>
       {selectionStatus && <Text role="status" aria-live="polite" aria-busy={selecting}>{selectionStatus}</Text>}
       {selecting && <Button variant="ghost" label="Cancel selection" onClick={chooseManually} />}
-      {!showPicker && !selecting && <Text type="supporting" color="secondary">Play checks a few sources and chooses one for your connection. Choose stream opens all sources.</Text>}
+      {!selectionStatus && rankState === 'ranking' && (
+        <Text type="supporting" color="secondary">Ranking sources for your connection…</Text>
+      )}
+      {!selectionStatus && rankState === 'ready' && (
+        <Text type="supporting" color="secondary">A stream is ranked and ready to play.</Text>
+      )}
+      {!selectionStatus && rankState === 'failed' && (
+        <Text type="supporting" color="secondary">No source passed the connection check. Play opens the stream list instead.</Text>
+      )}
+      {!showPicker && !selecting && <Text type="supporting" color="secondary">Play starts the best measured source. Choose stream opens all sources.</Text>}
       {showPicker && <>
       <HStack vAlign="center" hAlign="between" wrap="wrap" gap={2}>
         <Heading level={3}>Available Streams</Heading>
@@ -298,7 +375,10 @@ export function Sources({ addons, meta, videoId, onPlay, autoStart = false, init
           variant="ghost"
           icon={<Icon icon={RotateCw} />}
           label="Refresh sources"
-          onClick={() => setRetry(retry + 1)}
+          onClick={() => {
+            clearRankingCache();
+            setRetry(retry + 1);
+          }}
           isDisabled={pending > 0}
         />
       </HStack>

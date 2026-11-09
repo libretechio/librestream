@@ -1,5 +1,36 @@
 # LibreStream validation
 
+## Player tracks and prewarmed ranking (2026-11-09, local only)
+
+Reported defects: no audio track switching, no subtitles from embedded tracks or the OpenSubtitles addon, a dead play button beside each episode, and Play starting the connection ranking every time.
+
+Causes found in the code:
+- The client never requested the `subtitles` addon resource, so no subtitle list existed for any source.
+- `Player` rendered `<track default>` at mount and never set `TextTrack.mode`, so even a present list could not be switched.
+- The episode card was a single button and the play glyph was a decorative span inside it; pressing it only re-selected the episode.
+- `selectBestStream` ran inside the Play handler, so probing started after the user pressed Play.
+
+Changes:
+- `server.mjs`: `GET /api/subtitles/list/:index/:type/:id` queries a subtitle addon with `filename`/`videoSize` hints and rewrites every returned URL to an opaque same-origin handle. `GET /api/subtitles/:handle` proxies the file, converts SRT to WebVTT, decodes UTF-8 with a windows-1252 fallback, refuses HTML/JSON responses and enforces a 4 MB cap and per-user ownership. Subtitle URLs are never exposed to the client.
+- `web/subtitles.js`: parallel discovery across subtitle addons, one track per addon and language, English first, failed addons counted without hiding the rest.
+- `web/Player.jsx`: real track control. Addon tracks render as `<track id>` and are switched through `TextTrack.mode`; HLS embedded subtitle and audio tracks are switched through hls.js; native `audioTracks` are used when the browser exposes them. One "Playback" sheet holds Audio, Subtitles, Quality and Speed. Subtitle size persists.
+- `web/App.jsx`: each episode row now has a separate 44px play button that selects the episode and starts automatic playback; the row body still selects without playing.
+- `web/Sources.jsx`: ranking is warmed as soon as sources arrive, cached for ten minutes per title and episode, and deduplicated across in-flight runs. Play consumes the cached ranking instead of starting probes. Refresh sources clears the cache.
+
+Browser evidence (local preview, real addons):
+- OpenSubtitles v3 list returned 39 languages for a movie; a sampled track served `text/vtt` and parsed 1,721 cues.
+- Selecting English set `TextTrack.mode = "showing"` with cues present; selecting another language disabled it.
+- Prewarm: opening a title issued 3 probe requests with no Play press. Pressing Play afterwards issued 0 additional probes and used the cached result immediately.
+- Play episode triggered the ranking flow and opened the stream list when no sampled source passed.
+- Phone geometry at 375px: compact dock 91px tall with one 44px control row (previously 199px and three rows), no horizontal overflow; the Playback sheet fits at 359x652. Desktop at 1440px: dock 864px centered, one 44px row, nine controls.
+- Build and 45 tests pass. Local preview restarted on http://127.0.0.1:4173/.
+
+Not verified:
+- Audio track switching against a multi-audio HLS source. No such source was available locally; the control path is implemented but unexercised. Progressive MP4/MKV audio tracks cannot be switched by any browser, and the sheet states that instead of offering a dead control.
+- Embedded subtitle tracks from an HLS manifest, for the same reason.
+- Every sampled AIOStreams playback URL from this host still returned HTTP 502 (upstream redirects to Authentik), so ranking produced an empty result and Play fell back to the stream list. This is the pre-existing provider-delivery condition, not a regression from these changes.
+- Production. Nothing was pushed, merged or deployed for this change; production remains at v0.4.1.
+
 ## v0.3.1 mobile follow-up (2026-11-09)
 
 Palette selection preserves the independently chosen typography. Hero actions use two rows on phones; pager buttons, arrows, catalogue filters and See all have 44 CSS pixel touch targets. The appearance dialog has more vertical room and its preview wraps on narrow screens. Page bottom spacing includes the device safe area. Desktop navigation waits until 64rem; theme and profile labels wait until 75rem, avoiding the observed off-screen header controls at 768px.

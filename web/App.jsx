@@ -441,6 +441,7 @@ function TitleDialog({ item, addons, saved, onSave, onPlayStream, onClose, autoS
   const [meta, setMeta] = useState(item);
   const [loading, setLoading] = useState(true);
   const [season, setSeason] = useState('');
+  const [autoPlayId, setAutoPlayId] = useState(null);
   const [selected, setSelected] = useState(
     item.playbackId ? { id: item.playbackId, playbackTitle: item.playbackTitle } : item.type !== 'series' ? { id: item.id } : null
   );
@@ -619,40 +620,51 @@ function TitleDialog({ item, addons, saved, onSave, onPlayStream, onClose, autoS
                     const isEpSelected = selected?.id === v.id;
                     const thumb = safeURL(v.thumbnail || meta.background || meta.poster);
                     const epTitle = v.title || v.name || `Episode ${v.episode || ''}`;
+                    const episodeEntry = {
+                      ...v,
+                      playbackTitle: `${meta.name || meta.title} · S${v.season || 1}:E${v.episode || 1}`
+                    };
                     return (
-                      <button
-                        type="button"
-                        key={v.id}
-                        className={`nuvio-episode-card ${isEpSelected ? 'active' : ''}`}
-                        onClick={() =>
-                          setSelected({
-                            ...v,
-                            playbackTitle: `${meta.name || meta.title} · S${v.season || 1}:E${
-                              v.episode || 1
-                            }`
-                          })
-                        }
-                      >
-                        {thumb && (
-                          <div className="episode-thumb-box">
-                            <img src={thumb} alt="" className="episode-thumb-img" loading="lazy" />
-                            <span className="episode-num-pill">
-                              S{v.season || 1} · E{v.episode || 1}
+                      <div key={v.id} className={`nuvio-episode-card ${isEpSelected ? 'active' : ''}`}>
+                        <button
+                          type="button"
+                          className="episode-main"
+                          aria-pressed={isEpSelected}
+                          onClick={() => {
+                            setSelected(episodeEntry);
+                            setAutoPlayId(null);
+                          }}
+                        >
+                          {thumb && (
+                            <span className="episode-thumb-box">
+                              <img src={thumb} alt="" className="episode-thumb-img" loading="lazy" />
+                              <span className="episode-num-pill">
+                                S{v.season || 1} · E{v.episode || 1}
+                              </span>
                             </span>
-                          </div>
-                        )}
-                        <div className="episode-info-box">
-                          <span className="episode-title-text">
-                            Episode {v.episode || ''} · {epTitle}
-                          </span>
-                          {v.overview && (
-                            <span className="episode-overview-text">{v.overview}</span>
                           )}
-                        </div>
-                        <span className="stream-play-circle" aria-hidden="true">
-                          <NuvioPlayIcon size={14} />
-                        </span>
-                      </button>
+                          <span className="episode-info-box">
+                            <span className="episode-title-text">
+                              Episode {v.episode || ''} · {epTitle}
+                            </span>
+                            {v.overview && (
+                              <span className="episode-overview-text">{v.overview}</span>
+                            )}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="episode-play-btn"
+                          aria-label={`Play episode ${v.episode || ''} ${epTitle}`}
+                          title="Play this episode"
+                          onClick={() => {
+                            setSelected(episodeEntry);
+                            setAutoPlayId(v.id);
+                          }}
+                        >
+                          <NuvioPlayIcon size={16} />
+                        </button>
+                      </div>
                     );
                   })}
               </div>
@@ -664,7 +676,7 @@ function TitleDialog({ item, addons, saved, onSave, onPlayStream, onClose, autoS
               addons={addons}
               meta={{ ...meta, runtime: selected.runtime || meta.runtime }}
               videoId={selected.id}
-              autoStart={autoStart}
+              autoStart={autoStart || autoPlayId === selected.id}
               initialPicker={initialPicker}
               onSelectingChange={setSelectingStream}
               addonsLoading={addonsLoading}
@@ -831,6 +843,8 @@ export function App({ onThemeChange }) {
         meta={playingMeta}
         stream={activeStream}
         user={user}
+        addons={addons || []}
+        videoId={playingMeta.playbackId}
         playerStyle={preferences.player}
         onProgress={saveProgress}
         onBack={() => { setActiveStream(null); setAlternatives([]); }}
