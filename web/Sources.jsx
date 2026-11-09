@@ -3,43 +3,8 @@ import { Play, RotateCw } from 'lucide-react';
 import { Button, Chip, Spinner } from './ui.jsx';
 import { resource, supports, safeURL } from './api';
 import { streamInfo, filterStreams } from './streams';
-import { selectBestStream, waitForSources } from './autoSelect.js';
 import { availabilityFromStreams, rememberAvailability } from './badges.js';
-
-// Rankings are warmed as soon as sources arrive, so Play does not start the probing.
-const rankCache = new Map();
-const rankPending = new Map();
-const RANK_TTL = 10 * 60 * 1000;
-
-const canPlayTypeFor = () => {
-  const video = document.createElement('video');
-  return (type) => video.canPlayType(type);
-};
-
-function cachedRanking(key) {
-  const entry = rankCache.get(key);
-  if (!entry || Date.now() - entry.at > RANK_TTL) return null;
-  return entry.ranked;
-}
-
-function rankSources(key, rows, meta, onStatus) {
-  if (rankPending.has(key)) return rankPending.get(key);
-  const controller = new AbortController();
-  const pending = selectBestStream(rows, {
-    meta,
-    signal: controller.signal,
-    saveData: Boolean(navigator.connection?.saveData),
-    canPlayType: canPlayTypeFor(),
-    onStatus
-  })
-    .then((ranked) => {
-      rankCache.set(key, { ranked, at: Date.now() });
-      return ranked;
-    })
-    .finally(() => rankPending.delete(key));
-  rankPending.set(key, pending);
-  return pending;
-}
+import { rankByProfile, readRanking, writeRanking, rankingKey, ensureConnectionProfile, warmTitle, clearRankings } from './connection.js';
 
 export function Sources({
   addons,
@@ -50,14 +15,16 @@ export function Sources({
   initialPicker = false,
   addonsLoading = false,
   showActions = false,
-  openPicker = 0
+  openPicker = 0,
+  playRequest = 0,
+  onRankReady
 }) {
   const [rows, setRows] = useState([]);
   const [pending, setPending] = useState(0);
   const [failed, setFailed] = useState(0);
   const [retry, setRetry] = useState(0);
   const [filters, setFilters] = useState({ resolution: 'all', addon: 'all', cache: 'all' });
-  const [showPicker, setShowPicker] = useState(initialPicker || true);
+  const [showPicker, setShowPicker] = useState(Boolean(initialPicker));
   const [selecting, setSelecting] = useState(false);
   const [selectionStatus, setSelectionStatus] = useState('');
   const [rankState, setRankState] = useState('idle');
@@ -69,7 +36,7 @@ export function Sources({
   const onPlayRef = useRef(onPlay);
   onPlayRef.current = onPlay;
 
-  const rankingKey = `${meta.type}:${videoId}:${rows.length}`;
+  const cacheKey = rankingKey(meta, videoId, meta.type);
 
   useEffect(() => {
     const run = { controller: new AbortController(), queried: new Set() };
@@ -87,30 +54,38 @@ export function Sources({
     };
   }, [videoId, meta.type, retry]);
 
+  // One fetch per title: reuse the warm ranking instead of querying providers again.
   useEffect(() => {
     const run = discoveryRef.current;
-    for (const addon of addons.filter((entry) => supports(entry, 'stream', meta.type))) {
-      if (run.queried.has(addon.index)) continue;
-      run.queried.add(addon.index);
-      setPending((n) => n + 1);
-      resource(addon, 'stream', meta.type, videoId, '', run.controller.signal)
-        .then((data) => {
-          if (run.controller.signal.aborted) return;
-          const incoming = (Array.isArray(data.streams) ? data.streams : []).map((stream) => ({
-            a: addon,
-            stream,
-            info: streamInfo(addon, stream)
-          }));
-          setRows((old) => [...old, ...incoming]);
-        })
-        .catch(() => {
-          if (!run.controller.signal.aborted) setFailed((n) => n + 1);
-        })
-        .finally(() => {
-          if (!run.controller.signal.aborted) setPending((n) => n - 1);
-        });
-    }
-  }, [addons, videoId, meta.type, retry]);
+    let active = true;
+    setPending(1);
+    warmTitle({
+      key: cacheKey,
+      addons,
+      type: meta.type,
+      videoId,
+      meta,
+      signal: run.controller.signal
+    })
+      .then((entry) => {
+        if (!active || run.controller.signal.aborted) return;
+        if (!entry) {
+          setFailed((n) => n + 1);
+          return;
+        }
+        setRows(entry.rows);
+        setRankState(entry.ranked?.length ? 'ready' : 'failed');
+      })
+      .catch(() => {
+        if (active && !run.controller.signal.aborted) setFailed((n) => n + 1);
+      })
+      .finally(() => {
+        if (active && !run.controller.signal.aborted) setPending(0);
+      });
+    return () => {
+      active = false;
+    };
+  }, [cacheKey, addons, videoId, meta.type, retry]);
 
   // Remember what the providers actually offer, for the poster strip.
   useEffect(() => {
@@ -121,18 +96,22 @@ export function Sources({
     );
   }, [pending, rows, meta.id, meta.type]);
 
-  // Warm the ranking while the stream list is on screen.
+  // Rank as soon as the sources are in, using the connection measured at start-up.
   useEffect(() => {
     if (pending > 0 || !rows.length) return;
-    if (cachedRanking(rankingKey)) {
+    if (readRanking(cacheKey)?.ranked?.length) {
       setRankState('ready');
       return;
     }
     let active = true;
     setRankState('ranking');
-    rankSources(rankingKey, rows, stateRef.current.meta)
-      .then((ranked) => {
-        if (active) setRankState(ranked.length ? 'ready' : 'failed');
+    ensureConnectionProfile()
+      .then((measured) => {
+        if (!active) return;
+        const ranked = rankByProfile(rows, { meta, profile: measured });
+        writeRanking(cacheKey, { rows, ranked, profile: measured });
+        setRankState(ranked.length ? 'ready' : 'failed');
+        if (ranked.length) onRankReady?.(ranked);
       })
       .catch(() => {
         if (active) setRankState('failed');
@@ -140,45 +119,58 @@ export function Sources({
     return () => {
       active = false;
     };
-  }, [pending, rows, rankingKey]);
+  }, [pending, rows, cacheKey]);
 
+  // Play: use the warm ranking. Never opens the list, never measures again.
   const playAutomatically = async () => {
     selectionRef.current?.abort();
     const controller = new AbortController();
     selectionRef.current = controller;
     setSelecting(true);
     try {
-      let ranked = cachedRanking(rankingKey);
-      if (!ranked) {
-        setSelectionStatus('Checking sources for your connection…');
-        const available = await waitForSources(() => stateRef.current, {
-          signal: controller.signal,
-          canPlayType: canPlayTypeFor()
-        });
+      let entry = readRanking(cacheKey);
+      if (!entry?.ranked?.length) {
+        setSelectionStatus('Choosing a source…');
+        const measured = await ensureConnectionProfile();
+        // Wait for the in-flight warm fetch rather than starting another one.
+        const warmed = await Promise.race([
+          warmTitle({ key: cacheKey, addons, type: meta.type, videoId, meta, signal: controller.signal }),
+          new Promise((resolve) => setTimeout(() => resolve(null), 4000))
+        ]).catch(() => null);
+        entry = readRanking(cacheKey) || warmed;
         if (controller.signal.aborted) return;
-        ranked = await rankSources(rankingKey, available, stateRef.current.meta, setSelectionStatus);
+        const available = entry?.rows?.length ? entry.rows : stateRef.current.rows;
+        if (controller.signal.aborted) return;
+        if (!available.length) {
+          setSelectionStatus('No source is available yet. Choose a stream to see the list.');
+          setShowPicker(true);
+          return;
+        }
+        const ranked = rankByProfile(available, { meta: stateRef.current.meta, profile: measured });
+        entry = { rows: available, ranked, profile: measured };
+        writeRanking(cacheKey, entry);
       }
       if (controller.signal.aborted) return;
+      const ranked = entry.ranked;
       if (!ranked?.length) {
         setShowPicker(true);
-        setSelectionStatus('No source passed the connection check. Pick one below.');
+        setSelectionStatus('No playable source. Pick one from the list.');
         return;
       }
-      const viable = ranked.some((row) => row.fits) ? ranked.filter((row) => row.fits) : ranked.slice(0, 1);
-      const streams = viable.map((row) => ({
+      const streams = ranked.map((row) => ({
         ...row.stream,
         autoSelection: {
-          addon: row.a.name,
-          resolution: row.info.resolution,
-          mbps: row.measurement.mbps,
-          ttfbMs: row.measurement.ttfbMs
+          addon: row.a?.name || row.a?.index,
+          resolution: row.info?.resolution || `${row.resolution || ''}p`,
+          bitrate: Math.round(row.bitrate || 0),
+          pingMs: entry.profile?.pingMs || 0
         }
       }));
       onPlayRef.current(streams[0], { alternatives: streams.slice(1) });
     } catch {
       if (!controller.signal.aborted) {
         setShowPicker(true);
-        setSelectionStatus('Automatic selection could not finish. Pick a stream below.');
+        setSelectionStatus('Could not pick a source automatically.');
       }
     } finally {
       if (selectionRef.current === controller) setSelecting(false);
@@ -189,6 +181,13 @@ export function Sources({
     if (autoStart) playAutomatically();
     return () => selectionRef.current?.abort();
   }, [autoStart, videoId]);
+
+  // An explicit Play press re-runs selection, even when autoStart is unchanged.
+  useEffect(() => {
+    if (!playRequest) return;
+    playAutomatically();
+    return () => selectionRef.current?.abort();
+  }, [playRequest]);
 
   const playable = rows.filter(({ stream }) => safeURL(stream.url));
   const visible = filterStreams(playable, filters);
@@ -267,7 +266,7 @@ export function Sources({
               label="Refresh"
               disabled={pending > 0}
               onClick={() => {
-                rankCache.clear();
+                clearRankings();
                 setRetry((n) => n + 1);
               }}
             />

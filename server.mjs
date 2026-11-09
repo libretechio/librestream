@@ -98,6 +98,19 @@ export function createApp({addons=[], devIdentity=false, fetcher=fetch, root=res
       const url = new URL(req.url, 'http://localhost');
       if (url.pathname === '/health') return send(200, {ok:true});
 
+      // Client-side throughput check: a fixed, cache-free payload from this origin.
+      // Read-only, no upstream call, no user data.
+      if (url.pathname === '/api/ping') {
+        const bytes = Math.min(Math.max(Number(url.searchParams.get('bytes')) || 262144, 1024), 1048576);
+        res.writeHead(200, {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': String(bytes),
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff'
+        });
+        return res.end(Buffer.alloc(bytes));
+      }
+
       // Production must be reachable only through the trusted Authentik proxy.
       const username = devIdentity ? 'local-preview' : req.headers['x-authentik-username'];
       const uid = devIdentity ? 'local-preview' : req.headers['x-authentik-uid'];

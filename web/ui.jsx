@@ -134,25 +134,44 @@ export function Modal({ open, onClose, children, labelledBy, wide = false, bare 
 
   useEffect(() => {
     if (!open) return;
+    const previousFocus = document.activeElement;
+
+    const focusables = () =>
+      [...(ref.current?.querySelectorAll(
+        'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
+      ) || [])].filter((el) => el.offsetParent !== null);
+
     const onKey = (event) => {
       if (event.key === 'Escape') {
         event.stopPropagation();
         onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      // Keep Tab inside the dialog.
+      const items = focusables();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
       }
     };
+
     document.addEventListener('keydown', onKey);
-    const previous = document.body.style.overflow;
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    const timer = setTimeout(() => {
-      const focusable = ref.current?.querySelector(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
-      focusable?.focus();
-    }, 30);
+    const timer = setTimeout(() => focusables()[0]?.focus(), 30);
+
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = previous;
+      document.body.style.overflow = previousOverflow;
       clearTimeout(timer);
+      if (previousFocus instanceof HTMLElement) previousFocus.focus();
     };
   }, [open, onClose]);
 

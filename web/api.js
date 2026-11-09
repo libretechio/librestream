@@ -54,10 +54,3 @@ export function writeState(uid, name, value) {
   } catch {}
 }
 
-export function sourceLabel(a, stream) {
-  const text = [a.name, stream.name, stream.title || stream.description].filter(Boolean).join(' · ');
-  return text
-    .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, '')
-    .replace(/[ \t]+/g, ' ')
-    .trim();
-}

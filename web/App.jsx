@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { Button, IconButton, Badge, Chip, Field, Select, Segmented, Modal, ModalHeader, Skeleton } from './ui.jsx';
 import { Sources } from './Sources.jsx';
-import { Brand } from './Brand.jsx';
+import { Brand, BrandMark } from './Brand.jsx';
 import { HeroBanner } from './HeroBanner.jsx';
 import { Player } from './Player.jsx';
 import { AppearanceSettings, AppearanceContent } from './AppearanceSettings.jsx';
@@ -26,6 +26,7 @@ import {
 } from './Icons.jsx';
 import { DEFAULT_PREFERENCES, PALETTES, applyPaletteToDOM } from './palettes.js';
 import { api, resource, supports, dedupe, safeURL, readState, writeState } from './api';
+import { ensureConnectionProfile, warmTitle, rankingKey } from './connection.js';
 import {
   posterMetaLine,
   certificationOf,
@@ -352,16 +353,16 @@ function Catalog({ addon, catalog, onOpen, onPlay, onViewAll, onFeaturedItems, s
             <span className="ls-shelf-sub">{addon.name}</span>
           </div>
           {error ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--ls-3)' }}>
-              <p className="ls-note" style={{ padding: 'var(--ls-3)' }}>Catalog unavailable.</p>
+            <div className="ls-inline">
+              <p className="ls-note ls-note--flush">Catalog unavailable.</p>
               <Button variant="secondary" size="sm" icon={<RotateCw size={14} />} label="Try again" onClick={() => setAttempt((n) => n + 1)} />
             </div>
           ) : (
             <div className="ls-row-scroll" aria-label="Loading catalog">
               {[0, 1, 2, 3, 4, 5].map((index) => (
-                <div key={index} style={{ flex: '0 0 var(--ls-rail)', width: 'var(--ls-rail)' }}>
-                  <Skeleton height={Math.round(9.5 * 16 * 1.5)} radius={14} />
-                  <div style={{ height: 8 }} />
+                <div key={index} className="ls-skeleton-card">
+                  <Skeleton height={228} radius={14} />
+                  <div className="ls-skeleton-gap" />
                   <Skeleton height={12} width="78%" radius={4} />
                 </div>
               ))}
@@ -426,7 +427,7 @@ function Search({ addons, onOpen, onPlay, savedIds, progressMap, availabilitySto
         <Field label="Title" value={query} onChange={setQuery} placeholder="Search movies, series, anime…" />
         <Button type="submit" variant="primary" icon={<SearchIcon size={16} />} label="Search" busy={busy} disabled={!query.trim()} />
       </form>
-      {failed && <p className="ls-note" style={{ marginBottom: 'var(--ls-3)' }}>Some addon catalogs did not respond.</p>}
+      {failed && <p className="ls-note ls-note--tight">Some addon catalogs did not respond.</p>}
       {busy && !items?.length && <p className="ls-note">Searching {addons.length} addons…</p>}
       {items?.length ? (
         <Shelf
@@ -467,8 +468,10 @@ function TitlePage({
   const [loading, setLoading] = useState(true);
   const [season, setSeason] = useState('');
   const [showStreams, setShowStreams] = useState(initialPicker || autoStart);
+  const [picking, setPicking] = useState(Boolean(initialPicker));
   const [pickerRequest, setPickerRequest] = useState(initialPicker ? 1 : 0);
   const [autoPlayId, setAutoPlayId] = useState(null);
+  const [playRequest, setPlayRequest] = useState(0);
   const [selected, setSelected] = useState(
     item.playbackId
       ? { id: item.playbackId, playbackTitle: item.playbackTitle }
@@ -537,6 +540,28 @@ function TitlePage({
   const activeSeason = season || seasons.find((value) => Number(value) > 0) || seasons[0] || '';
   const isSaved = saved.some((entry) => entry.type === meta.type && entry.id === meta.id);
   const isSeries = meta.type === 'series' && episodes.length > 0;
+
+  // Fetch and rank this title's streams in the background, so Play is instant.
+  // For a series, warm the first episode of the season on screen.
+  useEffect(() => {
+    if (!addons?.length) return;
+    const firstEpisode = (meta.videos || []).find(
+      (video) => video.id && String(video.season ?? 0) === String(activeSeason)
+    );
+    const targetId = selected?.id || (meta.type !== 'series' ? meta.id : firstEpisode?.id || null);
+    if (!targetId) return;
+    const controller = new AbortController();
+    warmTitle({
+      key: rankingKey(meta, targetId, meta.type),
+      addons,
+      type: meta.type,
+      videoId: targetId,
+      meta,
+      signal: controller.signal
+    }).catch(() => {});
+    return () => controller.abort();
+  }, [addons, meta.id, meta.type, selected?.id, activeSeason]);
+
   const backdrop = safeURL(meta.background || meta.banner || meta.poster);
   const logo = safeURL(meta.logo);
   const title = meta.name || meta.title || meta.id;
@@ -575,7 +600,8 @@ function TitlePage({
             onClick={() => {
               setSelected({ id: meta.id });
               setShowStreams(true);
-              setAutoPlayId(meta.id);
+              setPicking(false);
+              setPlayRequest((n) => n + 1);
             }}
           />
           <Button
@@ -583,6 +609,7 @@ function TitlePage({
             label="Choose stream"
             onClick={() => {
               setShowStreams(true);
+              setPicking(true);
               setPickerRequest((n) => n + 1);
             }}
           />
@@ -601,16 +628,20 @@ function TitlePage({
 
   const sourcesBlock = showStreams && selected && (
     <div className="ls-takeover-section">
-      <h2 className="ls-section-title">
-        Streams
-        {isSeries && selected.playbackTitle ? <span className="ls-shelf-sub">{selected.playbackTitle}</span> : null}
-      </h2>
+      {picking && (
+        <h2 className="ls-section-title">
+          Streams
+          {isSeries && selected.playbackTitle ? <span className="ls-shelf-sub">{selected.playbackTitle}</span> : null}
+        </h2>
+      )}
       <Sources
         addons={addons}
         meta={{ ...meta, runtime: selected.runtime || meta.runtime }}
         videoId={selected.id}
         autoStart={autoStart || autoPlayId === selected.id}
+        playRequest={playRequest}
         openPicker={pickerRequest}
+        initialPicker={picking}
         showActions={false}
         addonsLoading={addonsLoading}
         onPlay={(streamObj, selection) =>
@@ -626,7 +657,7 @@ function TitlePage({
         {backdrop && <img className="ls-hero-art" src={backdrop} alt="" />}
         <div className="ls-hero-scrim" aria-hidden="true" />
         <div className="ls-takeover-body">
-          <button type="button" className="ls-btn ls-btn--ghost ls-btn--sm" onClick={onClose} style={{ alignSelf: 'flex-start' }}>
+          <button type="button" className="ls-btn ls-btn--ghost ls-btn--sm ls-self-start" onClick={onClose}>
             <ChevronLeft size={15} /> Back
           </button>
           {logo ? <img className="ls-hero-logo" src={logo} alt={title} /> : <h1 className="ls-hero-title">{title}</h1>}
@@ -648,7 +679,7 @@ function TitlePage({
               ))}
             </div>
           )}
-          {loading && <p className="ls-note" style={{ marginTop: 'var(--ls-3)' }}>Loading full metadata…</p>}
+          {loading && <p className="ls-note ls-mt-3">Loading full metadata…</p>}
         </div>
       )}
 
@@ -711,7 +742,7 @@ function TitlePage({
               })}
           </div>
           {cast.length > 0 && (
-            <div className="ls-cast" style={{ marginTop: 'var(--ls-5)' }}>
+            <div className="ls-cast ls-mt-5">
               <span className="ls-cast-label">Cast</span>
               {cast.map((person) => (
                 <span key={person} className="ls-cast-item">{person}</span>
@@ -729,8 +760,9 @@ function TitlePage({
 function EpisodePage({ episode, showTitle, addons, onPlayStream, onBack, onChooseStream, autoStart = false, initialPicker = false, addonsLoading = false }) {
   const backdrop = safeURL(episode.thumbnail || episode.background || episode.poster);
   const [showStreams, setShowStreams] = useState(initialPicker || autoStart);
+  const [picking, setPicking] = useState(Boolean(initialPicker));
   const [pickerRequest, setPickerRequest] = useState(initialPicker ? 1 : 0);
-  const [autoPlay, setAutoPlay] = useState(autoStart);
+  const [playRequest, setPlayRequest] = useState(autoStart ? 1 : 0);
 
   useEffect(() => {
     const onKey = (event) => {
@@ -740,16 +772,30 @@ function EpisodePage({ episode, showTitle, addons, onPlayStream, onBack, onChoos
     return () => document.removeEventListener('keydown', onKey);
   }, [onBack]);
 
+  useEffect(() => {
+    if (!addons?.length) return;
+    const controller = new AbortController();
+    warmTitle({
+      key: rankingKey(episode, episode.id, 'series'),
+      addons,
+      type: 'series',
+      videoId: episode.id,
+      meta: episode,
+      signal: controller.signal
+    }).catch(() => {});
+    return () => controller.abort();
+  }, [addons, episode.id]);
+
   return (
     <div className="ls-takeover">
-      <section className="ls-takeover-hero" style={{ minHeight: '18rem' }}>
+      <section className="ls-takeover-hero ls-hero--compact">
         {backdrop && <img className="ls-hero-art" src={backdrop} alt="" />}
         <div className="ls-hero-scrim" aria-hidden="true" />
         <div className="ls-takeover-body">
-          <button type="button" className="ls-btn ls-btn--ghost ls-btn--sm" onClick={onBack} style={{ alignSelf: 'flex-start' }}>
+          <button type="button" className="ls-btn ls-btn--ghost ls-btn--sm ls-self-start" onClick={onBack}>
             <ChevronLeft size={15} /> {showTitle}
           </button>
-          <h1 className="ls-hero-title" style={{ fontSize: 'clamp(1.5rem,3.4vw,2.25rem)' }}>
+          <h1 className="ls-hero-title">
             {episode.title || episode.name || `Episode ${episode.episode || ''}`}
           </h1>
           <div className="ls-hero-facts">
@@ -768,9 +814,9 @@ function EpisodePage({ episode, showTitle, addons, onPlayStream, onBack, onChoos
               icon={<Play size={15} fill="currentColor" strokeWidth={0} />}
               label="Play"
               onClick={() => {
-                setAutoPlay(true);
                 setShowStreams(true);
-                setPickerRequest((n) => n + 1);
+                setPicking(false);
+                setPlayRequest((n) => n + 1);
               }}
             />
             <Button
@@ -778,6 +824,7 @@ function EpisodePage({ episode, showTitle, addons, onPlayStream, onBack, onChoos
               label="Choose stream"
               onClick={() => {
                 setShowStreams(true);
+                setPicking(true);
                 setPickerRequest((n) => n + 1);
               }}
             />
@@ -787,13 +834,14 @@ function EpisodePage({ episode, showTitle, addons, onPlayStream, onBack, onChoos
 
       {showStreams && (
         <div className="ls-takeover-section">
-          <h2 className="ls-section-title">Streams</h2>
+          {picking && <h2 className="ls-section-title">Streams</h2>}
           <Sources
             addons={addons}
             meta={{ ...episode, type: episode.type || 'series' }}
             videoId={episode.id}
-            autoStart={autoPlay}
+            playRequest={playRequest}
             openPicker={pickerRequest}
+            initialPicker={picking}
             showActions={false}
             addonsLoading={addonsLoading}
             onPlay={(streamObj, selection) => onPlayStream(streamObj, episode, selection)}
@@ -840,6 +888,8 @@ export function App({ onThemeChange }) {
   async function boot() {
     setError('');
     setAddonsLoading(true);
+    // One connection measurement per session, before any Play is pressed.
+    ensureConnectionProfile().catch(() => {});
     try {
       const me = await api('/api/me');
       setUser(me);
@@ -1014,8 +1064,10 @@ export function App({ onThemeChange }) {
 
       <header className="ls-dock-top">
         <a className="ls-brand" href="#home" aria-label="LibreStream home">
-          <span className="ls-brand-mark">L</span>
-          <Brand wordmark />
+          <span className="ls-brand-mark" aria-hidden="true">
+            <BrandMark size={20} />
+          </span>
+          <Brand />
         </a>
         <nav className="ls-nav" aria-label="Main">
           {nav
@@ -1040,7 +1092,7 @@ export function App({ onThemeChange }) {
       <main className="ls-main" id="content">
         {error ? (
           <div className="ls-page">
-            <p className="ls-note" style={{ marginBottom: 'var(--ls-3)' }}>{error}</p>
+            <p className="ls-note ls-note--tight">{error}</p>
             <Button variant="secondary" icon={<RotateCw size={15} />} label="Try again" onClick={boot} />
           </div>
         ) : !addons ? (
@@ -1049,7 +1101,7 @@ export function App({ onThemeChange }) {
             <div style={{ height: 24 }} />
             <div className="ls-row-scroll">
               {[0, 1, 2, 3, 4, 5].map((index) => (
-                <div key={index} style={{ flex: '0 0 var(--ls-rail)', width: 'var(--ls-rail)' }}>
+                <div key={index} className="ls-skeleton-card">
                   <Skeleton height={228} radius={14} />
                 </div>
               ))}
@@ -1077,7 +1129,7 @@ export function App({ onThemeChange }) {
         ) : route === 'settings' ? (
           <div className="ls-page">
             <h1 className="ls-page-title">Settings</h1>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--ls-6)' }}>
+            <div className="ls-stack">
               <div className="ls-profile">
                 <div className="ls-profile-avatar">{(user?.name || 'L').slice(0, 1).toUpperCase()}</div>
                 <div>
@@ -1098,7 +1150,7 @@ export function App({ onThemeChange }) {
                     icon={<RotateCw size={14} />}
                     label="Refresh"
                     onClick={async () => setAddons(await api('/api/addons'))}
-                    style={{ marginInlineStart: 'auto' }}
+                    className="ls-push"
                   />
                 </div>
                 <div className="ls-addons">
@@ -1138,8 +1190,8 @@ export function App({ onThemeChange }) {
               />
             )}
 
-            <div className="ls-shelf" style={{ marginBottom: 'var(--ls-2)' }}>
-              <div className="ls-row-scroll" style={{ gap: 'var(--ls-2)' }}>
+            <div className="ls-shelf ls-shelf--filters">
+              <div className="ls-row-scroll ls-row-scroll--tight">
                 {[
                   ['all', 'All'],
                   ['movies', 'Movies'],
@@ -1149,17 +1201,6 @@ export function App({ onThemeChange }) {
                     {label}
                   </Chip>
                 ))}
-                <Chip
-                  active={preferences.posterShape === 'landscape'}
-                  onClick={() =>
-                    handleApplyPreferences({
-                      ...preferences,
-                      posterShape: preferences.posterShape === 'landscape' ? 'poster' : 'landscape'
-                    })
-                  }
-                >
-                  Widescreen cards
-                </Chip>
               </div>
             </div>
 
@@ -1211,7 +1252,7 @@ export function App({ onThemeChange }) {
       {item && !episode && (
         <Modal open bare wide onClose={() => setItem(null)} labelledBy="title-page">
           <div className="ls-modal-body" style={{ padding: 0 }}>
-            <h2 id="title-page" className="ls-visually-hidden" style={{ position: 'absolute', left: -9999 }}>
+            <h2 id="title-page" className="ls-visually-hidden">
               {item.name || item.id}
             </h2>
             <TitlePage
@@ -1237,7 +1278,7 @@ export function App({ onThemeChange }) {
       {episode && (
         <Modal open bare wide onClose={() => setEpisode(null)} labelledBy="episode-page">
           <div className="ls-modal-body" style={{ padding: 0 }}>
-            <h2 id="episode-page" style={{ position: 'absolute', left: -9999 }}>
+            <h2 id="episode-page" className="ls-visually-hidden">
               {episode.title || 'Episode'}
             </h2>
             <EpisodePage

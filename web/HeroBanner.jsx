@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, Play } from 'lucide-react';
 import { Button, IconButton } from './ui.jsx';
 import { ImdbBadge } from './Icons.jsx';
@@ -9,6 +9,7 @@ export function HeroBanner({ items = [], onPlay, onChooseStream, onDetails, save
   const slides = items.slice(0, 8);
   const [index, setIndex] = useState(0);
   const [logoBroken, setLogoBroken] = useState({});
+  const touchRef = useRef({ x: 0, y: 0, active: false });
 
   useEffect(() => {
     if (index >= slides.length) setIndex(0);
@@ -27,8 +28,45 @@ export function HeroBanner({ items = [], onPlay, onChooseStream, onDetails, save
   const isSaved = saved.some((entry) => entry.id === active.id && entry.type === active.type);
   const year = active.year || active.releaseInfo;
 
+  const go = (delta) => setIndex((current) => (current + delta + slides.length) % slides.length);
+
+  // Horizontal swipe anywhere on the hero moves to the next title.
+  const onTouchStart = (event) => {
+    const touch = event.touches[0];
+    if (!touch) return;
+    touchRef.current = { x: touch.clientX, y: touch.clientY, active: true };
+  };
+
+  const onTouchEnd = (event) => {
+    if (!touchRef.current.active) return;
+    const touch = event.changedTouches[0];
+    touchRef.current.active = false;
+    if (!touch) return;
+    const dx = touch.clientX - touchRef.current.x;
+    const dy = touch.clientY - touchRef.current.y;
+    if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.4) go(dx < 0 ? 1 : -1);
+  };
+
+  const onKeyDown = (event) => {
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      go(1);
+    } else if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      go(-1);
+    }
+  };
+
   return (
-    <section className="ls-hero" aria-label="Featured">
+    <section
+      className="ls-hero"
+      aria-label="Featured"
+      aria-roledescription="carousel"
+      tabIndex={-1}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+      onKeyDown={onKeyDown}
+    >
       {backdrop && <img className="ls-hero-art" src={backdrop} alt="" />}
       <div className="ls-hero-scrim" aria-hidden="true" />
 
@@ -111,14 +149,14 @@ export function HeroBanner({ items = [], onPlay, onChooseStream, onDetails, save
             </div>
             <div className="ls-hero-arrows">
               <IconButton
-                icon={<ChevronLeft size={16} />}
+                icon={<ChevronLeft size={18} />}
                 label="Previous featured title"
-                onClick={() => setIndex((current) => (current - 1 + slides.length) % slides.length)}
+                onClick={() => go(-1)}
               />
               <IconButton
-                icon={<ChevronRight size={16} />}
+                icon={<ChevronRight size={18} />}
                 label="Next featured title"
-                onClick={() => setIndex((current) => (current + 1) % slides.length)}
+                onClick={() => go(1)}
               />
             </div>
           </div>

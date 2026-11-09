@@ -694,6 +694,15 @@ body {
   display: flex;
   align-items: center;
   gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ls-hero-dots::-webkit-scrollbar {
+  display: none;
 }
 
 .ls-hero-dots button {
@@ -729,6 +738,7 @@ body {
 .ls-hero-arrows {
   display: flex;
   gap: var(--ls-1);
+  flex: 0 0 auto;
 }
 
 /* ============================== shelves ============================== */
@@ -1210,6 +1220,18 @@ body {
   display: flex;
   gap: var(--ls-1);
   flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Long season lists wrap; the section title row wraps with them. */
+.ls-section-title {
+  flex-wrap: wrap;
+  row-gap: var(--ls-2);
+}
+
+.ls-section-title .ls-season-tabs {
+  flex: 1 1 100%;
 }
 
 /* episode rows */
@@ -2396,4 +2418,61 @@ body {
   clip: rect(0 0 0 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* ============================== small utilities ============================== */
+.ls-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--ls-3);
+  flex-wrap: wrap;
+}
+
+.ls-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ls-6);
+}
+
+.ls-shelf-head .ls-push {
+  margin-inline-start: auto;
+}
+
+.ls-note--tight {
+  margin-bottom: var(--ls-3);
+}
+
+.ls-note--flush {
+  padding: var(--ls-3);
+}
+
+.ls-mt-3 { margin-top: var(--ls-3); }
+.ls-mt-5 { margin-top: var(--ls-5); }
+
+.ls-self-start { align-self: flex-start; }
+
+
+.ls-hero--compact {
+  min-height: 18rem;
+}
+
+.ls-hero--compact .ls-hero-title {
+  font-size: clamp(1.5rem, 3.4vw, 2.25rem);
+}
+
+.ls-skeleton-card {
+  flex: 0 0 var(--ls-rail);
+  width: var(--ls-rail);
+}
+
+.ls-skeleton-gap {
+  height: var(--ls-2);
+}
+
+.ls-shelf--filters {
+  margin-bottom: var(--ls-2);
+}
+
+.ls-row-scroll--tight {
+  gap: var(--ls-2);
 }

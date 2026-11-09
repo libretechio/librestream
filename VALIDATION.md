@@ -1,5 +1,35 @@
 # LibreStream validation
 
+## Fix round: hero paging, seasons, instant Play (2026-11-09, local only)
+
+Reported, then reproduced in the browser before changing anything:
+
+1. **No right arrow on the hero.** At 390px the pager had 350px, but 8 dots (288px) plus two arrows (80px) needed 394px, so the right arrow sat at x=378–414 — outside the viewport. The dots strip now shrinks and scrolls; arrows are `flex: 0 0 auto`. Measured after: arrows at 294–330 and 334–370, both inside 390.
+2. **No swipe on the hero.** Added a horizontal swipe handler (48px threshold, must beat vertical movement by 1.4x) plus Left/Right arrow keys. Verified: swipe moved slide 0 → 1.
+3. **Widescreen-cards chip** removed from the home filter strip.
+4. **Ship logo missing.** `BrandMark` existed but the dock rendered a letter tile. The ship SVG is back in the dock.
+5. **Many seasons broke the layout.** Season chips now wrap inside the section title row. Measured with 7 chips at 390px: 2 rows, right edge 353, no overflow.
+6. **Play must play immediately.** Added `web/connection.js`: one connection measurement per session at start-up (best of 3 pings + a 256 KB `/api/ping` sample), cached 30 minutes. Streams are fetched and ranked per title when it is opened — the first episode of the visible season for series — and reused. Play consumes that ranking; it never probes, never opens the list. Measured: movie Play → player in 156 ms, episode Play in 141 ms, zero stream rows rendered.
+7. **Stream options only behind Choose stream.** The list is gated on an explicit pick; pressing Play after opening it closes it again.
+
+Bugs found while doing this (all real, all fixed):
+- Sources fetched every provider a second time on top of the warm fetch (14 duplicate requests). It now reuses `warmTitle`, so a title costs one round of requests.
+- Warmed rows carried `info: null`, which crashed the list renderer.
+- `rankingKey` built `movie:` for episodes because episode objects have no `type`, so the warm ranking was never found.
+- The Play wait loop read `pending` from a stale closure and gave up immediately.
+- A `useEffect` referencing `activeSeason` above its declaration threw a temporal-dead-zone error and blanked the title page.
+
+Antislop / hygiene pass:
+- Minimum type size raised to 12px everywhere (was 11px). Contrast re-measured: 17.29 titles, 6.17 card metadata, 7.71 synopsis.
+- Modal now traps Tab and restores focus to the previously focused element.
+- Static inline styles replaced with utility classes; duplicate `.ls-visually-hidden` removed.
+- Dead code deleted: `web/autoSelect.js` and its four test files (superseded by `connection.js`), plus unused exports `sourceLabel`, `parseStreamMeta` and five unused icons.
+- 165 CSS classes, 0 dead. `!important` appears only in the reduced-motion block.
+
+State: 54 tests pass, build passes, no console errors across home, title, streams, seasons and player.
+
+Not verified: human visual review, Safari/iOS, real AIOStreams playback (provider links still fail the probe), Rotten Tomatoes badges (no addon supplies a score), production.
+
 ## Overhaul: Astryx removed, Warm Graphite glass (2026-11-09, local only)
 
 Six decisions were taken from rendered mockups before any app code changed (mockups in `mockups/`: directions.png, header.png, posters.png, detail3.png, episodes.png, player3.png).

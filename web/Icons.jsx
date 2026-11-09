@@ -84,57 +84,9 @@ export function NuvioPlayIcon({ size = 18, className = '' }) {
   );
 }
 
-export function NuvioPauseIcon({ size = 18, className = '' }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M2 6c0-1.89 0-2.83.59-3.41C3.17 2 4.11 2 6 2s2.83 0 3.41.59C10 3.17 10 4.11 10 6v12c0 1.89 0 2.83-.59 3.41C8.83 22 7.89 22 6 22s-2.83 0-3.41-.59C2 20.83 2 19.89 2 18V6Zm12 0c0-1.89 0-2.83.59-3.41C15.17 2 16.11 2 18 2s2.83 0 3.41.59C22 3.17 22 4.11 22 6v12c0 1.89 0 2.83-.59 3.41-.58.59-1.52.59-3.41.59s-2.83 0-3.41-.59C14 20.83 14 19.89 14 18V6Z"
-      />
-    </svg>
-  );
-}
 
-export function NuvioSourceIcon({ size = 18, className = '' }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <path
-        d="M3 13.65C3 16.6 5.42 19 8.4 19h8.1c2.49 0 4.5-2.02 4.5-4.5 0-1.85-1.11-3.55-2.7-4.25C18.13 7.32 15.68 5 12.69 5c-2.34 0-4.34 1.49-5.19 3.5-2.7.44-4.5 2.7-4.5 5.15Z"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
-export function NuvioEpisodesIcon({ size = 18, className = '' }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <path
-        fill="currentColor"
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M4 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2Zm0 2v10h10V10H4Zm13 9V8a1 1 0 0 0-1-1H5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2Zm3-3V5a1 1 0 0 0-1-1H8a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2Z"
-      />
-    </svg>
-  );
-}
 
-export function NuvioSubtitlesIcon({ size = 18, className = '' }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <rect x="2" y="4" width="20" height="16" rx="4" stroke="currentColor" strokeWidth="2" />
-      <path
-        d="M6 13h5M13 13h5M6 16.5h8M16 16.5h2"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 
 export function ImdbBadge({ rating, size = 'md' }) {
   if (!rating) return null;
@@ -146,13 +98,3 @@ export function ImdbBadge({ rating, size = 'md' }) {
   );
 }
 
-export function BoltIcon({ size = 14, className = '' }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M13.5 2L4 13.5h6.5L9.5 22L20 10.5h-6.5L13.5 2Z"
-      />
-    </svg>
-  );
-}
