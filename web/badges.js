@@ -65,7 +65,26 @@ export function awardsBadge(awards) {
 }
 
 export function certificationOf(meta = {}) {
-  return String(meta.certification || meta.ageRating || '').trim().slice(0, 8);
+  const extras = meta.app_extras || {};
+  return String(
+    meta.certification || meta.ageRating || extras.certification || ''
+  ).trim().slice(0, 8);
+}
+
+// A Rotten Tomatoes score is only shown when the provider actually sent one.
+export function rottenTomatoesOf(meta = {}) {
+  const extras = meta.app_extras || {};
+  const raw =
+    meta.rtRating || meta.rottenTomatoes || meta.tomatoMeter ||
+    meta.tomatoMeterRating || extras.rtRating || extras.tomatoMeter || extras.rottenTomatoes;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const value = typeof raw === 'object' ? raw.score ?? raw.value ?? raw.rating : raw;
+  const score = Number(String(value).replace('%', ''));
+  if (!Number.isFinite(score) || score < 0 || score > 100) return null;
+  const certified = Boolean(
+    (typeof raw === 'object' && raw.certified) || meta.rtCertified || extras.rtCertified
+  );
+  return { score, certified };
 }
 
 export function languageList(text, limit = 4) {
@@ -88,6 +107,7 @@ export function availabilityFromStreams(streams = []) {
   let dv = false;
   let atmos = false;
   let remux = false;
+  let largest = 0;
   for (const stream of streams) {
     const text = [stream.name, stream.title, stream.description, stream.behaviorHints?.filename]
       .filter(Boolean)
@@ -101,6 +121,11 @@ export function availabilityFromStreams(streams = []) {
     if (/\bhdr(10)?\b/i.test(text)) hdr = true;
     if (/\batmos\b/i.test(text)) atmos = true;
     if (/\bremux\b/i.test(text)) remux = true;
+    const size = Number(stream.behaviorHints?.videoSize) ||
+      (text.match(/\b(\d+(?:\.\d+)?)\s*(GB|GiB|MB|MiB)\b/i)
+        ? Number(RegExp.$1) * (/g/i.test(RegExp.$2) ? 1024 ** 3 : 1024 ** 2)
+        : 0);
+    if (size > largest) largest = size;
     if (/\b(ready\s*\(tb\)|tb\+|cached|instant)\b|⚡/i.test(text)) cached += 1;
     for (const name of languageList(text, 99).all) {
       if (name !== 'Multi' && !languages.includes(name)) languages.push(name);
@@ -115,6 +140,7 @@ export function availabilityFromStreams(streams = []) {
     dv,
     atmos,
     remux,
+    size: largest,
     total: streams.length
   };
 }
@@ -123,16 +149,24 @@ export function availabilityBadges(availability) {
   if (!availability) return [];
   const badges = [];
   const top = availability.resolutions[0];
-  if (top) badges.push(top === '2160p' ? '4K' : top.replace('p', 'p'));
+  if (top) badges.push(top === '2160p' ? '4K' : top);
   if (availability.dv) badges.push('DV');
   else if (availability.hdr) badges.push('HDR');
   if (availability.atmos) badges.push('Atmos');
   if (availability.remux) badges.push('REMUX');
   if (availability.languages?.length) {
-    badges.push(availability.languages.slice(0, 2).join(' / '));
-    if (availability.languages.length > 2) badges.push(`+${availability.languages.length - 2}`);
+    badges.push(`${availability.languages.length} lang`);
   }
   return badges;
+}
+
+export function formatSize(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value <= 0) return '';
+  const gb = value / 1024 ** 3;
+  if (gb >= 1) return `${gb >= 10 ? Math.round(gb) : gb.toFixed(1)} GB`;
+  const mb = value / 1024 ** 2;
+  return mb >= 1 ? `${Math.round(mb)} MB` : '';
 }
 
 // Availability is remembered per title after the user opens it: no extra requests.
@@ -146,11 +180,28 @@ export function readAvailabilityStore() {
   }
 }
 
+// Certification and a Rotten Tomatoes score only arrive with the full metadata,
+// so they are remembered per title after it has been opened once.
+export function rememberTitleMeta(key, { cert, rt } = {}) {
+  if (!key) return;
+  try {
+    const store = readAvailabilityStore();
+    const entry = store[key] || {};
+    if (cert) entry.cert = cert;
+    if (rt && rt.score) entry.rt = rt.score;
+    if (!Object.keys(entry).length) return;
+    store[key] = entry;
+    localStorage.setItem(STORE_KEY, JSON.stringify(store));
+  } catch {}
+}
+
 export function rememberAvailability(key, availability) {
   if (!key) return;
   try {
     const store = readAvailabilityStore();
+    // Merge: certification and the RT score arrive from metadata and must survive.
     store[key] = {
+      ...store[key],
       resolutions: availability.resolutions,
       languages: availability.languages.slice(0, 8),
       cached: availability.cached,
@@ -158,6 +209,7 @@ export function rememberAvailability(key, availability) {
       dv: availability.dv,
       atmos: availability.atmos,
       remux: availability.remux,
+      size: availability.size || 0,
       at: Date.now()
     };
     const keys = Object.keys(store);

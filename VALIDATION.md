@@ -1,5 +1,38 @@
 # LibreStream validation
 
+## Frosted glass pass + poster information split (2026-11-09, local only)
+
+Reference: a Google Stitch mockup the user liked (Apple TV+ / Infuse frosted glass), used as a style reference for existing components only. Nothing was copied wholesale.
+
+Poster information, as directed:
+- Inside the artwork: IMDb rating, Rotten Tomatoes score, age certification. Nothing else.
+- Under the artwork (the strip): quality flags (4K / DV / HDR / Atmos / REMUX), language count, file size, cached, new, saved.
+- Rotten Tomatoes: **no configured addon supplies an RT score.** The RT addon's catalog entries carry only id/name/poster/description, and its meta endpoint returns 502 here. The badge renders only when a real score arrives (`rtRating`, `tomatoMeter`, `rottenTomatoes` or `app_extras.*`), so it is hidden today rather than faked.
+- Age certification: Cinemeta does not send one; Xperience sends `app_extras.certification`. Metadata from all meta-capable addons is now merged instead of first-wins, so certification is found. It is remembered per title, so the poster shows `R` after the title has been opened once.
+
+Frosted glass, applied to existing elements:
+- Surfaces neutralised to near-black (`#0b0b0d` / `#0f0f12` / `#18181c`); the Oxblood accent `#c0524a` is kept.
+- Header: fixed, gradient-to-transparent, `backdrop-filter: blur(20px)`, plain text navigation with no pill, circular ghost buttons, white brand tile.
+- Hero: two-gradient vignette, frosted meta chips, white solid primary CTA + frosted secondary, 12px radii.
+- Posters: 12px radius, 1px white/6% hairline, hover scale 1.03 with a deep shadow (no accent border), frosted rating chips, white circular play on hover.
+- Dialogs and stream rows: frosted panels (`blur(28px) saturate(180%)`), 16px radius, stream rows as individual glass cards with white circular play on hover.
+- Player: floating frosted deck (`blur(40px)`, 16px radius), white circular play, thin white scrubber with a hover thumb, glass pills for audio/subtitles and sources in the top bar.
+- Continue watching: glass cards, white progress bar, resume-time chip on the artwork.
+
+Bug found and fixed while driving the UI: on the desktop two-column title panel the Sources action row is hidden, so "Choose stream" opened nothing. `Sources` now accepts an `openPicker` signal from the parent.
+
+Measured (Chromium, local preview, real addons)
+- Header blur active; hero CTA `rgb(255,255,255)`; poster radius 12px with `rgba(255,255,255,0.06)` border; rating chips `blur(12px)`; dialog `blur(28px)` at 16px radius; player deck `blur(40px)`, 16px radius, white play, 8px inner icon radius.
+- Poster for a read title: `R` top-right, `★ 7.8` top-left, strip `4K · DV · Atmos · REMUX · 8 lang · 72 GB · cached`.
+- Desktop stream picker: 493 rows from PenguPlay/AIOStreams; no overflow at 1425 or 375 px.
+- Build and 66 tests pass.
+
+Not verified
+- Human visual review; every check here is geometry and computed style.
+- Rotten Tomatoes scores, because no addon provides them.
+- Safari and iOS.
+- Production. Nothing pushed, merged or deployed.
+
 ## Round 5 — strip prefetch, player alignment, resume cards (2026-11-09, local only)
 
 Chosen by the user: prefetch the first visible titles, align the player to the approved system, and show resume time on continue-watching artwork.

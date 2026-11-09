@@ -14,11 +14,11 @@
   --ls-10: 2.5rem;
   --ls-12: 3rem;
 
-  /* radius — S2 Soft: artwork 10, controls 8, badges 4, panels 12 */
-  --ls-radius-sm: 4px;
+  /* radius — Apple TV / Infuse: artwork 12, controls 12, badges 6, panels 16 */
+  --ls-radius-sm: 6px;
   --ls-radius: 8px;
-  --ls-radius-md: 10px;
-  --ls-radius-lg: 12px;
+  --ls-radius-md: 12px;
+  --ls-radius-lg: 16px;
 
   /* type */
   --ls-text-2xs: 0.6875rem;
@@ -47,6 +47,15 @@
   --ls-ink-2: var(--color-text-secondary);
   /* Tertiary ink stays opaque so it never inherits the surface alpha. */
   --ls-ink-3: color-mix(in srgb, var(--color-text-secondary) 88%, var(--color-background-body));
+
+  /* frosted glass: floating chrome only — header, hero CTAs, player deck, panels */
+  --ls-glass-bg: rgba(22, 22, 27, 0.72);
+  --ls-glass-bg-strong: rgba(22, 23, 27, 0.86);
+  --ls-glass-card: rgba(255, 255, 255, 0.05);
+  --ls-glass-card-hover: rgba(255, 255, 255, 0.10);
+  --ls-glass-line: rgba(255, 255, 255, 0.10);
+  --ls-glass-line-strong: rgba(255, 255, 255, 0.18);
+  --ls-glass-blur: blur(28px) saturate(180%);
 
   /* one soft elevation, used only where an object lifts off the page */
   --ls-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);

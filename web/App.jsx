@@ -44,6 +44,9 @@ import {
   episodeSummary,
   runtimeLabel,
   availabilityBadges,
+  formatSize,
+  rottenTomatoesOf,
+  rememberTitleMeta,
   readAvailabilityStore,
   titlesNeedingAvailability,
   prefetchAvailability
@@ -77,8 +80,10 @@ function PosterCard({
   onPlay
 }) {
   const [broken, setBroken] = useState(false);
-  const rating = item.imdbRating || item.rating;
-  const certification = certificationOf(item);
+  const imdb = item.imdbRating || item.rating;
+  const remembered = availability || {};
+  const rt = rottenTomatoesOf(item) || (remembered.rt ? { score: remembered.rt, certified: false } : null);
+  const certification = certificationOf(item) || remembered.cert || '';
   const title = item.name || item.title || item.id;
   const isLandscape = shape === 'landscape' && !inGrid;
   const imgUrl = isLandscape
@@ -90,11 +95,15 @@ function PosterCard({
   const fresh = isNew(item);
   const pct = Math.round(Math.min(100, Math.max(0, progress)));
 
-  // The strip carries quality, language count and cache. Hover reveals the rest.
-  const quality = availabilityBadges(availability);
-  const shown = quality.slice(0, 3);
-  const trimmed = quality.slice(3);
-  const langCount = availability?.languages?.length || 0;
+  // Inside the poster: ratings and certification only.
+  // Everything else belongs to the strip underneath.
+  const strip = [
+    ...availabilityBadges(availability),
+    availability?.size ? formatSize(availability.size) : '',
+    availability?.cached > 0 ? 'cached' : '',
+    fresh ? 'new' : '',
+    saved ? 'saved' : ''
+  ].filter(Boolean);
 
   return (
     <div
@@ -125,15 +134,31 @@ function PosterCard({
               </div>
             )}
 
-            <div className="poster-badges-top">
-              {certification && <span className="poster-badge">{certification}</span>}
-              {fresh && <span className="poster-badge is-new">New</span>}
-            </div>
+            {certification && (
+              <span className="poster-cert" aria-label={`Rated ${certification}`}>
+                {certification}
+              </span>
+            )}
 
-            {rating && (
-              <span className="poster-badge is-rating">
-                <span className="poster-star">★</span>
-                {Number(rating) ? Number(rating).toFixed(1) : rating}
+            {(imdb || rt) && (
+              <span className="poster-ratings">
+                {imdb && (
+                  <span className="poster-rating is-imdb">
+                    <span className="poster-star">★</span>
+                    {Number(imdb) ? Number(imdb).toFixed(1) : imdb}
+                  </span>
+                )}
+                {rt && (
+                  <span
+                    className={`poster-rating is-rt ${rt.score >= 60 ? 'is-fresh' : 'is-rotten'}`}
+                    aria-label={`Rotten Tomatoes ${rt.score} percent`}
+                  >
+                    <span className="poster-tomato" aria-hidden="true">
+                      {rt.score >= 60 ? '🍅' : '🤮'}
+                    </span>
+                    {rt.score}%
+                  </span>
+                )}
               </span>
             )}
 
@@ -144,16 +169,6 @@ function PosterCard({
             {pct > 0 && (
               <div className="poster-progress" aria-hidden="true">
                 <div style={{ width: `${pct}%` }} />
-              </div>
-            )}
-
-            {trimmed.length > 0 && (
-              <div className="poster-reveal" aria-hidden="true">
-                {trimmed.map((badge) => (
-                  <span key={badge} className="poster-badge is-quality">
-                    {badge}
-                  </span>
-                ))}
               </div>
             )}
           </div>
@@ -178,16 +193,18 @@ function PosterCard({
       <button type="button" className="poster-caption" onClick={() => onOpen(item)}>
         <span className="poster-title">{title}</span>
         {metaLine && <span className="poster-sub">{metaLine}</span>}
-        {(shown.length > 0 || langCount > 0 || saved) && (
+        {strip.length > 0 && (
           <span className="poster-strip">
-            {shown.map((badge) => (
-              <i key={badge} className="poster-chip is-quality">
-                {badge}
+            {strip.map((label) => (
+              <i
+                key={label}
+                className={`poster-chip${
+                  /^(4K|DV|HDR|Atmos|REMUX|\d+p)$/i.test(label) ? ' is-quality' : ''
+                }${label === 'cached' ? ' is-cache' : ''}`}
+              >
+                {label}
               </i>
             ))}
-            {langCount > 0 && <i className="poster-chip">{langCount} lang</i>}
-            {availability?.cached > 0 && <i className="poster-chip is-cache">cached</i>}
-            {saved && <i className="poster-chip is-saved">saved</i>}
           </span>
         )}
       </button>
@@ -615,13 +632,15 @@ function TitleDialog({ item, addons, saved, onSave, onPlayStream, onClose, autoS
   const [season, setSeason] = useState('');
   const [tab, setTab] = useState('episodes');
   const [autoPlayId, setAutoPlayId] = useState(null);
+  const [pickerRequest, setPickerRequest] = useState(0);
   const [selected, setSelected] = useState(
     item.playbackId ? { id: item.playbackId, playbackTitle: item.playbackTitle } : item.type !== 'series' ? { id: item.id } : null
   );
 
   useEffect(() => {
     let active = true;
-    Promise.any(
+    // Ask every metadata addon and merge: one supplies certification, another ratings.
+    Promise.allSettled(
       addons
         .filter((a) => supports(a, 'meta', item.type))
         .map(async (a) => {
@@ -630,10 +649,28 @@ function TitleDialog({ item, addons, saved, onSave, onPlayStream, onClose, autoS
           return data.meta;
         })
     )
-      .then((data) => {
+      .then((results) => {
         if (!active) return;
-        const merged = { ...item, ...data };
+        const answers = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
+        if (!answers.length) throw Error('No metadata');
+        const mergedAnswer = answers.reduce((acc, meta) => {
+          for (const [key, value] of Object.entries(meta)) {
+            const current = acc[key];
+            const empty = current === undefined || current === null || current === '' ||
+              (Array.isArray(current) && !current.length);
+            if (empty) acc[key] = value;
+            else if (key === 'app_extras' && value && typeof value === 'object') {
+              acc[key] = { ...value, ...acc[key] };
+            }
+          }
+          return acc;
+        }, {});
+        const merged = { ...item, ...mergedAnswer };
         setMeta(merged);
+        rememberTitleMeta(
+          (merged.type || 'movie') + ':' + merged.id,
+          { cert: certificationOf(merged), rt: rottenTomatoesOf(merged) }
+        );
         const vids = (merged.videos || []).filter((v) => v.id);
         if (merged.type !== 'series' && !vids.length) {
           setSelected({ id: merged.id });
@@ -702,6 +739,7 @@ function TitleDialog({ item, addons, saved, onSave, onPlayStream, onClose, autoS
           setAutoPlayId(null);
           setTab('streams');
           if (!selected) setSelected({ id: meta.id });
+          setPickerRequest((n) => n + 1);
         }}
       >
         Choose stream
@@ -826,6 +864,7 @@ function TitleDialog({ item, addons, saved, onSave, onPlayStream, onClose, autoS
       videoId={selected.id}
       autoStart={autoStart || autoPlayId === selected.id}
       initialPicker={initialPicker}
+      openPicker={pickerRequest}
       showActions={!wide}
       onSelectingChange={setSelectingStream}
       addonsLoading={addonsLoading}

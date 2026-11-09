@@ -54,7 +54,7 @@ function rankSources(key, rows, meta, onStatus) {
   return pending;
 }
 
-export function Sources({ addons, meta, videoId, onPlay, autoStart = false, initialPicker = false, onSelectingChange, addonsLoading = false, showActions = true }) {
+export function Sources({ addons, meta, videoId, onPlay, autoStart = false, initialPicker = false, onSelectingChange, addonsLoading = false, showActions = true, openPicker = 0 }) {
   const [rows, setRows] = useState([]);
   const [pending, setPending] = useState(0);
   const [failed, setFailed] = useState(0);
@@ -183,6 +183,14 @@ export function Sources({ addons, meta, videoId, onPlay, autoStart = false, init
   }, [autoStart, videoId]);
 
   useEffect(() => { onSelectingChange?.(selecting); }, [selecting, onSelectingChange]);
+
+  // The parent can ask for the full stream list (desktop action row lives outside).
+  useEffect(() => {
+    if (!openPicker) return;
+    selectionRef.current?.abort();
+    setSelecting(false);
+    setShowPicker(true);
+  }, [openPicker]);
 
   // Remember what the providers actually offer, so the poster can show it later.
   useEffect(() => {

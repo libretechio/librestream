@@ -708,8 +708,27 @@ export function Player({
           </p>
         </div>
         <div className="ls-top-actions">
-          <button type="button" className="ls-icon" title="Choose stream" aria-label="Choose stream" onClick={() => onSwitchSource?.()}>
-            <Layers size={18} />
+          <button
+            type="button"
+            className="ls-pill"
+            title="Audio and subtitles"
+            onClick={() => openPanel('tracks')}
+          >
+            <Languages size={16} />
+            <span>{activeAudio >= 0 && audioTracks[activeAudio]
+              ? audioTracks[activeAudio].language
+              : 'Audio'}</span>
+            <span className="ls-pill-sep">·</span>
+            <span>{activeSub ? activeSub.language : 'Subs off'}</span>
+          </button>
+          <button
+            type="button"
+            className="ls-pill"
+            title="Sources"
+            onClick={() => onSwitchSource?.()}
+          >
+            <Layers size={16} />
+            <span>{sourceName.length > 22 ? sourceName.slice(0, 22) + '…' : sourceName}</span>
           </button>
           <button type="button" className="ls-icon" title="Fullscreen (F)" aria-label="Fullscreen" onClick={toggleFullscreen}>
             {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
