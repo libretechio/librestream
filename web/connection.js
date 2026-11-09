@@ -6,6 +6,7 @@
 // instant. Nothing here probes provider URLs on demand.
 
 import { streamInfo } from './streams.js';
+import { selectBestStream } from './autoSelect.js';
 
 const PROFILE_KEY = 'librestream:connection';
 const PROFILE_TTL = 30 * 60 * 1000;
@@ -189,10 +190,15 @@ export function warmTitle({ key, addons, type, videoId, meta, signal, onReady })
 
   const pending = Promise.all(
     providers.map(async (addon) => {
+      const controller = new AbortController();
+      const cancel = () => controller.abort();
+      signal?.addEventListener('abort', cancel, { once: true });
+      if (signal?.aborted) cancel();
+      const timer = setTimeout(cancel, 8000);
       try {
         const url =
           '/api/addon/' + addon.index + '/stream/' + encodeURIComponent(type) + '/' + encodeURIComponent(videoId);
-        const response = await fetch(url, { credentials: 'same-origin', signal });
+        const response = await fetch(url, { credentials: 'same-origin', signal: controller.signal });
         if (!response.ok) return [];
         const data = await response.json();
         return (Array.isArray(data.streams) ? data.streams : []).map((stream) => ({
@@ -202,6 +208,9 @@ export function warmTitle({ key, addons, type, videoId, meta, signal, onReady })
         }));
       } catch {
         return [];
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', cancel);
       }
     })
   )
@@ -209,8 +218,9 @@ export function warmTitle({ key, addons, type, videoId, meta, signal, onReady })
       const rows = groups.flat();
       if (!rows.length) return null;
       const measured = await ensureConnectionProfile();
-      const ranked = rankByProfile(rows, { meta, profile: measured });
-      const entry = { rows, ranked, profile: measured };
+      const canPlayType = typeof document === 'undefined' ? () => 'maybe' : (type) => document.createElement('video').canPlayType(type);
+      const ranked = await selectBestStream(rows, { meta, signal, canPlayType, saveData: measured?.saveData });
+      const entry = { rows, ranked, profile: measured, verified: true };
       writeRanking(key, entry);
       onReady?.(entry);
       return entry;

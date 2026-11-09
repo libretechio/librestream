@@ -4,7 +4,7 @@ import { Button, Chip, Spinner } from './ui.jsx';
 import { resource, supports, safeURL } from './api';
 import { streamInfo, filterStreams } from './streams';
 import { availabilityFromStreams, rememberAvailability } from './badges.js';
-import { rankByProfile, readRanking, writeRanking, rankingKey, ensureConnectionProfile, warmTitle, clearRankings } from './connection.js';
+import { readRanking, rankingKey, warmTitle, clearRankings } from './connection.js';
 
 export function Sources({
   addons,
@@ -96,64 +96,46 @@ export function Sources({
     );
   }, [pending, rows, meta.id, meta.type]);
 
-  // Rank as soon as the sources are in, using the connection measured at start-up.
-  useEffect(() => {
-    if (pending > 0 || !rows.length) return;
-    if (readRanking(cacheKey)?.ranked?.length) {
-      setRankState('ready');
+  // Play: use the warm ranking and start synchronously, inside the tap, so the
+  // browser counts it as user activation. Never opens the list, never measures.
+  const playAutomatically = () => {
+    setShowPicker(false);
+    setSelectionStatus('');
+    const ready = readRanking(cacheKey);
+    if (ready?.ranked?.length) {
+      const streams = ready.ranked.map((row) => ({
+        ...row.stream,
+        autoSelection: {
+          addon: row.a?.name || row.a?.index,
+          resolution: row.info?.resolution || `${row.resolution || ''}p`,
+          bitrate: Math.round(row.bitrate || 0),
+          pingMs: ready.profile?.pingMs || 0
+        }
+      }));
+      onPlayRef.current(streams[0], { alternatives: streams.slice(1) });
       return;
     }
-    let active = true;
-    setRankState('ranking');
-    ensureConnectionProfile()
-      .then((measured) => {
-        if (!active) return;
-        const ranked = rankByProfile(rows, { meta, profile: measured });
-        writeRanking(cacheKey, { rows, ranked, profile: measured });
-        setRankState(ranked.length ? 'ready' : 'failed');
-        if (ranked.length) onRankReady?.(ranked);
-      })
-      .catch(() => {
-        if (active) setRankState('failed');
-      });
-    return () => {
-      active = false;
-    };
-  }, [pending, rows, cacheKey]);
+    playAfterDiscovery();
+  };
 
-  // Play: use the warm ranking. Never opens the list, never measures again.
-  const playAutomatically = async () => {
+  // Cold path only: discovery has not finished, so wait for it once.
+  const playAfterDiscovery = async () => {
     selectionRef.current?.abort();
     const controller = new AbortController();
     selectionRef.current = controller;
     setSelecting(true);
     try {
-      let entry = readRanking(cacheKey);
-      if (!entry?.ranked?.length) {
-        setSelectionStatus('Choosing a source…');
-        const measured = await ensureConnectionProfile();
-        // Wait for the in-flight warm fetch rather than starting another one.
-        const warmed = await Promise.race([
-          warmTitle({ key: cacheKey, addons, type: meta.type, videoId, meta, signal: controller.signal }),
-          new Promise((resolve) => setTimeout(() => resolve(null), 4000))
-        ]).catch(() => null);
-        entry = readRanking(cacheKey) || warmed;
-        if (controller.signal.aborted) return;
-        const available = entry?.rows?.length ? entry.rows : stateRef.current.rows;
-        if (controller.signal.aborted) return;
-        if (!available.length) {
-          setSelectionStatus('No source is available yet. Choose a stream to see the list.');
-          setShowPicker(true);
-          return;
-        }
-        const ranked = rankByProfile(available, { meta: stateRef.current.meta, profile: measured });
-        entry = { rows: available, ranked, profile: measured };
-        writeRanking(cacheKey, entry);
-      }
+      setSelectionStatus('Choosing a source…');
+      const warmed = await warmTitle({ key: cacheKey, addons, type: meta.type, videoId, meta, signal: controller.signal }).catch(() => null);
       if (controller.signal.aborted) return;
-      const ranked = entry.ranked;
-      if (!ranked?.length) {
-        setShowPicker(true);
+      const entry = readRanking(cacheKey) || warmed;
+      const available = entry?.rows?.length ? entry.rows : stateRef.current.rows;
+      if (!available.length) {
+        setSelectionStatus('No source is available yet. Pick one from the list.');
+        return;
+      }
+      const ranked = entry?.verified ? entry.ranked : [];
+      if (!ranked.length) {
         setSelectionStatus('No playable source. Pick one from the list.');
         return;
       }
@@ -163,13 +145,12 @@ export function Sources({
           addon: row.a?.name || row.a?.index,
           resolution: row.info?.resolution || `${row.resolution || ''}p`,
           bitrate: Math.round(row.bitrate || 0),
-          pingMs: entry.profile?.pingMs || 0
+          pingMs: entry?.profile?.pingMs || 0
         }
       }));
       onPlayRef.current(streams[0], { alternatives: streams.slice(1) });
     } catch {
       if (!controller.signal.aborted) {
-        setShowPicker(true);
         setSelectionStatus('Could not pick a source automatically.');
       }
     } finally {
@@ -181,6 +162,14 @@ export function Sources({
     if (autoStart) playAutomatically();
     return () => selectionRef.current?.abort();
   }, [autoStart, videoId]);
+
+  useEffect(() => {
+    if (!openPicker) return;
+    selectionRef.current?.abort();
+    setSelecting(false);
+    setSelectionStatus('');
+    setShowPicker(true);
+  }, [openPicker]);
 
   // An explicit Play press re-runs selection, even when autoStart is unchanged.
   useEffect(() => {

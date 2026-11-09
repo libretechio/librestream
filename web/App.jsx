@@ -866,6 +866,7 @@ export function App({ onThemeChange }) {
   const [expandedCatalog, setExpandedCatalog] = useState(null);
   const [activeStream, setActiveStream] = useState(null);
   const [playingMeta, setPlayingMeta] = useState(null);
+  const [alternatives, setAlternatives] = useState([]);
   const [saved, setSaved] = useState([]);
   const [progress, setProgress] = useState({});
   const [featuredItems, setFeaturedItems] = useState([]);
@@ -971,6 +972,7 @@ export function App({ onThemeChange }) {
   };
 
   const startPlayback = (streamObj, mediaMeta, selection) => {
+    setAlternatives(selection?.alternatives || []);
     setActiveStream(streamObj);
     setPlayingMeta(mediaMeta);
     setItem(null);
@@ -1029,14 +1031,25 @@ export function App({ onThemeChange }) {
         addons={addons || []}
         videoId={playingMeta.playbackId}
         onProgress={saveProgress}
+        onFailure={(position) => {
+          // Try the next ranked source, keeping the playback position.
+          if (!alternatives.length) return false;
+          const [next, ...rest] = alternatives;
+          setActiveStream(next);
+          setAlternatives(rest);
+          setPlayingMeta((old) => ({ ...old, resumePosition: position || old?.resumePosition }));
+          return true;
+        }}
         onBack={() => {
           setActiveStream(null);
+          setAlternatives([]);
           setAvailabilityStore(readAvailabilityStore());
         }}
         onSwitchSource={() => {
           const target = playingMeta;
           setActiveStream(null);
-          openTitle({ ...target, id: target.playbackId ? target.id : target.id, type: target.type }, 'choose');
+          setAlternatives([]);
+          openTitle({ ...target, type: target.type }, 'choose');
         }}
       />
     );
