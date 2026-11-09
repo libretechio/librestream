@@ -1,0 +1,83 @@
+/* LibreStream design tokens.
+   One scale for space, radius, type and elevation. Palette colours come from
+   palettes.css; everything here is derived, so a palette swap restyles the app. */
+
+:root {
+  /* space — 4px grid */
+  --ls-1: 0.25rem;
+  --ls-2: 0.5rem;
+  --ls-3: 0.75rem;
+  --ls-4: 1rem;
+  --ls-5: 1.25rem;
+  --ls-6: 1.5rem;
+  --ls-8: 2rem;
+  --ls-10: 2.5rem;
+  --ls-12: 3rem;
+
+  /* radius — four steps, nothing else */
+  --ls-radius-sm: 4px;
+  --ls-radius: 6px;
+  --ls-radius-md: 8px;
+  --ls-radius-lg: 12px;
+
+  /* type */
+  --ls-text-2xs: 0.6875rem;
+  --ls-text-xs: 0.75rem;
+  --ls-text-sm: 0.8125rem;
+  --ls-text-base: 0.875rem;
+  --ls-text-md: 1rem;
+  --ls-text-lg: 1.25rem;
+  --ls-text-xl: 1.625rem;
+  --ls-text-2xl: 2.125rem;
+  --ls-leading-tight: 1.2;
+  --ls-leading: 1.5;
+
+  /* surfaces — solid, layered by luminance, never by blur */
+  --ls-bg: var(--color-background-body);
+  --ls-surface: var(--color-background-surface);
+  --ls-card: var(--color-background-card);
+  --ls-raised: var(--color-background-popover, var(--color-background-card));
+  --ls-line: var(--color-border);
+  --ls-line-strong: var(--color-border-emphasized);
+
+  /* ink */
+  --ls-ink: var(--color-text-primary);
+  --ls-ink-2: var(--color-text-secondary);
+  /* Tertiary ink stays opaque so it never inherits the surface alpha. */
+  --ls-ink-3: color-mix(in srgb, var(--color-text-secondary) 88%, var(--color-background-body));
+
+  /* accent — primary action, active state, focus ring. Nothing else. */
+  --ls-accent: var(--color-accent);
+  --ls-accent-ink: var(--color-on-accent, #111111);
+  --ls-accent-soft: color-mix(in srgb, var(--color-accent) 14%, transparent);
+
+  /* controls */
+  --ls-control-h: 2.25rem;
+  --ls-control-h-lg: 2.5rem;
+  --ls-focus: 2px solid var(--color-accent);
+  --ls-focus-offset: 2px;
+
+  /* layout */
+  --ls-rail: 7.5rem;
+  --ls-rail-wide: 14rem;
+  --ls-page-pad: 1rem;
+  --ls-nav-h: 3.75rem;
+  --ls-header-h: 3.5rem;
+}
+
+@media (min-width: 48rem) {
+  :root {
+    --ls-rail: 8.75rem;
+    --ls-rail-wide: 16rem;
+    --ls-page-pad: 2rem;
+    --ls-header-h: 4rem;
+  }
+}
+
+@media (min-width: 80rem) {
+  :root {
+    --ls-rail: 10rem;
+    --ls-rail-wide: 18rem;
+    --ls-page-pad: 2.5rem;
+  }
+}

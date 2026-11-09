@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Button } from '@astryxdesign/core/Button';
 import { Badge } from '@astryxdesign/core/Badge';
-import { Carousel } from '@astryxdesign/core/Carousel';
 import { Skeleton } from '@astryxdesign/core/Skeleton';
 import { Icon } from '@astryxdesign/core/Icon';
 import {
@@ -9,6 +8,7 @@ import {
   BookmarkCheck,
   Clapperboard,
   RotateCw,
+  ChevronLeft,
   ChevronRight,
   Check
 } from 'lucide-react';
@@ -16,7 +16,6 @@ import { TextInput } from '@astryxdesign/core/TextInput';
 import { Selector } from '@astryxdesign/core/Selector';
 import { Dialog, DialogHeader } from '@astryxdesign/core/Dialog';
 import { AppShell } from '@astryxdesign/core/AppShell';
-import { Layout, LayoutContent, LayoutHeader } from '@astryxdesign/core/Layout';
 import { VStack } from '@astryxdesign/core/VStack';
 import { HStack } from '@astryxdesign/core/HStack';
 import { Text } from '@astryxdesign/core/Text';
@@ -58,12 +57,11 @@ function Message({ children }) {
 function PosterCard({ item, onOpen, shape = 'poster', inGrid = false }) {
   const [broken, setBroken] = useState(false);
   const rating = item.imdbRating || item.rating;
-  const age =
-    item.certification ||
-    item.ageRating ||
-    (item.type === 'series' ? 'Series' : 'Movie');
+  const certification = item.certification || item.ageRating || '';
+  const typeLabel = item.type === 'series' ? 'Series' : item.type === 'movie' ? 'Movie' : '';
   const title = item.name || item.title || item.id;
   const year = item.year || item.releaseInfo;
+  const metaLine = [year, typeLabel].filter(Boolean).join(' · ');
   const isLandscape = shape === 'landscape' && !inGrid;
   const imgUrl = isLandscape
     ? safeURL(item.background || item.banner || item.poster)
@@ -95,12 +93,11 @@ function PosterCard({ item, onOpen, shape = 'poster', inGrid = false }) {
           </div>
         )}
 
-        <div className="poster-scrim" aria-hidden="true" />
-
-        {age && <span className="poster-badge-top-right">{age}</span>}
+        {certification && <span className="poster-badge-top-right">{certification}</span>}
         {rating && (
           <span className="poster-badge-bottom">
-            <span className="poster-star">★</span> {rating}
+            <span className="poster-star">★</span>
+            {Number(rating) ? Number(rating).toFixed(1) : rating}
           </span>
         )}
         {isLandscape && logoUrl && (
@@ -110,9 +107,66 @@ function PosterCard({ item, onOpen, shape = 'poster', inGrid = false }) {
 
       <div className="poster-info">
         <span className="poster-title">{title}</span>
-        {year && <span className="poster-sub">{String(year)}</span>}
+        {metaLine && <span className="poster-sub">{metaLine}</span>}
       </div>
     </button>
+  );
+}
+
+function ScrollRow({ label, children }) {
+  const ref = useRef(null);
+  const [edges, setEdges] = useState({ start: false, end: false });
+
+  const measure = () => {
+    const el = ref.current;
+    if (!el) return;
+    setEdges({
+      start: el.scrollLeft > 4,
+      end: el.scrollLeft + el.clientWidth < el.scrollWidth - 4
+    });
+  };
+
+  useEffect(() => {
+    measure();
+    const el = ref.current;
+    if (!el) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [children]);
+
+  const nudge = (direction) => {
+    const el = ref.current;
+    if (!el) return;
+    el.scrollBy({ left: direction * Math.round(el.clientWidth * 0.8), behavior: 'smooth' });
+  };
+
+  return (
+    <div className="scroll-row">
+      <div className="poster-row" ref={ref} onScroll={measure} aria-label={label}>
+        {children}
+      </div>
+      {edges.start && (
+        <button
+          type="button"
+          className="row-arrow is-start"
+          aria-label={`Scroll ${label} back`}
+          onClick={() => nudge(-1)}
+        >
+          <ChevronLeft size={16} />
+        </button>
+      )}
+      {edges.end && (
+        <button
+          type="button"
+          className="row-arrow is-end"
+          aria-label={`Scroll ${label} forward`}
+          onClick={() => nudge(1)}
+        >
+          <ChevronRight size={16} />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -161,14 +215,7 @@ function Shelf({
           ))}
         </div>
       ) : (
-        <Carousel
-          gap={3}
-          hasSnap
-          hasEdgeFade
-          hasButtons
-          aria-label={title}
-          className="nuvio-shelf-carousel"
-        >
+        <ScrollRow label={title}>
           {items.map((item) => (
             <PosterCard
               key={(item.type || 'media') + ':' + item.id}
@@ -177,7 +224,7 @@ function Shelf({
               shape={shape}
             />
           ))}
-        </Carousel>
+        </ScrollRow>
       )}
     </section>
   );
@@ -195,14 +242,7 @@ function ContinueWatchingShelf({ items, onOpen }) {
           <span className="shelf-subtitle">Pick up right where you left off</span>
         </div>
       </div>
-      <Carousel
-        gap={3}
-        hasSnap
-        hasEdgeFade
-        hasButtons
-        aria-label="Continue watching"
-        className="nuvio-shelf-carousel"
-      >
+      <ScrollRow label="Continue watching">
         {items.map((item) => {
           const pct = Math.min(100, Math.max(1, (item.position / (item.duration || 1)) * 100));
           const backdrop = safeURL(item.background || item.poster);
@@ -236,7 +276,7 @@ function ContinueWatchingShelf({ items, onOpen }) {
             </button>
           );
         })}
-      </Carousel>
+      </ScrollRow>
     </section>
   );
 }
@@ -396,7 +436,7 @@ function Search({ addons, onOpen }) {
   }
 
   return (
-    <VStack gap={5} className="page-section">
+    <VStack gap={5} className="search-page">
       <HStack as="form" className="search-form" gap={3} vAlign="end" onSubmit={run}>
         <TextInput
           startIcon={NuvioSearchIcon}
@@ -974,75 +1014,35 @@ export function App({ onThemeChange }) {
             </div>
           </VStack>
         ) : route === 'search' ? (
-          <Layout
-            height="auto"
-            padding={4}
-            header={
-              <LayoutHeader hasDivider={false}>
-                <Heading level={1}>Search Catalogs</Heading>
-              </LayoutHeader>
-            }
-            content={
-              <LayoutContent>
-                <Search addons={addons} onOpen={openTitle} />
-              </LayoutContent>
-            }
-          />
+          <section className="page-section">
+            <h1 className="page-title">Search</h1>
+            <Search addons={addons} onOpen={openTitle} />
+          </section>
         ) : route === 'library' ? (
-          <Layout
-            height="auto"
-            padding={4}
-            header={
-              <LayoutHeader hasDivider={false}>
-                <Heading level={1}>Saved Watchlist</Heading>
-              </LayoutHeader>
-            }
-            content={
-              <LayoutContent>
-                {saved.length ? (
-                  <Shelf title="Saved titles" items={saved} grid onOpen={openTitle} />
-                ) : (
-                  <VStack gap={3} className="page-section">
-                    <Message>
-                      Your watchlist is empty. Open any movie or series and tap Add to Watchlist.
-                    </Message>
-                  </VStack>
-                )}
-              </LayoutContent>
-            }
-          />
+          <section className="page-section">
+            <h1 className="page-title">Saved</h1>
+            {saved.length ? (
+              <div className="shelf shelf-inline">
+                <Shelf title="Watchlist" subtitle={`${saved.length} saved`} items={saved} grid onOpen={openTitle} />
+              </div>
+            ) : (
+              <p className="empty-note">
+                Nothing saved yet. Open a title and choose Add to Watchlist.
+              </p>
+            )}
+          </section>
         ) : route === 'themes' ? (
-          <Layout
-            height="auto"
-            padding={4}
-            header={
-              <LayoutHeader hasDivider={false}>
-                <Heading level={1}>Appearance & Themes</Heading>
-              </LayoutHeader>
-            }
-            content={
-              <LayoutContent>
-                <div className="page-section">
-                  <AppearanceContent
-                    currentPreferences={preferences}
-                    onApply={handleApplyPreferences}
-                  />
-                </div>
-              </LayoutContent>
-            }
-          />
+          <section className="page-section">
+            <h1 className="page-title">Appearance</h1>
+            <AppearanceContent
+              currentPreferences={preferences}
+              onApply={handleApplyPreferences}
+            />
+          </section>
         ) : route === 'settings' ? (
-          <Layout
-            height="auto"
-            padding={4}
-            header={
-              <LayoutHeader hasDivider={false}>
-                <Heading level={1}>Settings & Addons</Heading>
-              </LayoutHeader>
-            }
-            content={
-              <LayoutContent>
-                <VStack gap={6} className="page-section">
+          <section className="page-section">
+            <h1 className="page-title">Settings</h1>
+            <VStack gap={6}>
                   <div className="settings-profile-banner">
                     <div className="settings-avatar-lg">
                       {(user?.name || 'L').slice(0, 1).toUpperCase()}
@@ -1078,7 +1078,13 @@ export function App({ onThemeChange }) {
                           <div className="addon-card-info">
                             <span className="addon-card-title">{a.name}</span>
                             <span className="addon-card-sub">
-                              {a.catalogs?.length || 0} catalogs · {(a.resources || []).join(', ')}
+                              {a.catalogs?.length || 0} catalogs
+                              {(() => {
+                                const names = (a.resources || [])
+                                  .map((r) => (typeof r === 'string' ? r : r?.name))
+                                  .filter(Boolean);
+                                return names.length ? ` · ${[...new Set(names)].join(', ')}` : '';
+                              })()}
                             </span>
                           </div>
                           <Badge
@@ -1089,10 +1095,8 @@ export function App({ onThemeChange }) {
                       ))}
                     </div>
                   </VStack>
-                </VStack>
-              </LayoutContent>
-            }
-          />
+            </VStack>
+          </section>
         ) : (
           /* Browse / Home Route */
           <VStack gap={0} width="100%">

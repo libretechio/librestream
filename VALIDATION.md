@@ -1,5 +1,33 @@
 # LibreStream validation
 
+## Interface system pass (2026-11-09, local only)
+
+Scope: the whole interface, not only the player. Header, navigation, hero, shelves, posters, continue watching, title dialog, episodes, sources, appearance and settings were rebuilt on one token layer.
+
+What changed
+- `web/tokens.css` (new) defines the only sizes used: 4px spacing grid, four radii (4/6/8/12), seven type steps, four surface levels, hairline borders, one accent, focus ring. Every value derives from the palette variables, so a palette swap restyles the app.
+- `web/browser.css` was rewritten around that layer. Removed: 15 pill radii (9999px), the ambient blurred hero backdrop, the second hero scrim, the poster gradient scrim on every card, hover translate/scale, card drop shadows, and the decorative app-shell glow.
+- Shelves no longer use the Astryx Carousel: its round shadowed pagination dots and edge fade were the last pill-and-shadow artefacts. `ScrollRow` renders a plain scroll strip with desktop arrows that appear only when the strip can actually scroll.
+- Posters now show certification, a rating chip and a `year · type` line. The invented "Movie/Series as age rating" badge was replaced by real certification data when present.
+- Header navigation is a segmented control; the phone bar is a flat bar with an accent rule on the active tab. Only one navigation is visible at any width (phone bar below 64rem, header navigation at and above it).
+- Search, Saved, Appearance and Settings pages dropped the Astryx `Layout` wrapper for page sections with a shared title style, so their headings match the rest of the app.
+- Fixed a content bug found during the pass: addon rows printed `[object Object]` for providers whose resources are objects.
+
+Measured in the browser (Chromium, local preview, real addons)
+- Slop audit across all five routes: pill-radius elements 0, gradients 0 on every route except the hero scrim (1), blur 2 (header and phone bar only), shadows 1-3 (navigation inset hairline plus Astryx segmented control, both now flattened).
+- Contrast on the shipped dark palette: poster meta 7.45, shelf subtitle 8.78, poster title 14.9, hero synopsis 8.28, heading 17.56.
+- Contrast on the light palette (Catppuccin Latte): lowest 5.14. Tertiary ink is now an opaque mix rather than an alpha, which is what made the light palette fail at 3.45 before.
+- Phone 375x844: no horizontal overflow; every interactive target is at least 40px (0 of 129 below 40px). Poster rail 143px wide, three visible per row. Appearance grid resolves to 2 columns.
+- Tablet 885px: one navigation only (phone bar), shelf arrows present.
+- Desktop 1425x900: header navigation, hero 432px with side poster 160x240, poster rail 160x240, shelf strips scroll (4116px content in 1381px viewport).
+- Player unchanged from the previous pass except that it inherits the token layer.
+- Build and 51 tests pass.
+
+Not verified
+- Visual review by a human. Geometry, contrast, target size and computed styles were measured programmatically; nobody has looked at the rendered result yet.
+- Safari and iOS. Chromium only.
+- Production. Nothing pushed, merged or deployed for this pass.
+
 ## Player chrome, subtitle placement and aspect modes (2026-11-09, local only)
 
 Reported: cues ran off the bottom of the screen, fullscreen did nothing, no aspect/zoom control, and the player chrome still read as generated rather than designed.

@@ -24,6 +24,7 @@ import '@fontsource-variable/space-grotesk';
 import '@fontsource-variable/jetbrains-mono';
 
 import './palettes.css';
+import './tokens.css';
 import './browser.css';
 import { App } from './App.jsx';
 import { PALETTES, DEFAULT_PREFERENCES, applyPaletteToDOM } from './palettes.js';
