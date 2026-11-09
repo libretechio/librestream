@@ -1,6 +1,6 @@
 {
   "name": "librestream",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,8 +11,18 @@
   },
   "dependencies": {
     "@astryxdesign/core": "^0.7.11",
+    "@astryxdesign/theme-butter": "^0.7.11",
+    "@astryxdesign/theme-chocolate": "^0.7.11",
+    "@astryxdesign/theme-gothic": "^0.7.11",
+    "@astryxdesign/theme-matcha": "^0.7.11",
     "@astryxdesign/theme-neutral": "^0.7.11",
+    "@astryxdesign/theme-stone": "^0.7.11",
+    "@astryxdesign/theme-y2k": "^0.7.11",
     "@fontsource-variable/figtree": "^5.3.0",
+    "@fontsource-variable/fraunces": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/plus-jakarta-sans": "^5.3.0",
+    "@fontsource-variable/space-grotesk": "^5.3.0",
     "@stylexjs/stylex": "^0.19.1",
     "hls.js": "^1.6.13",
     "lucide-react": "^0.468.0",

@@ -15,7 +15,12 @@ const MIME = {
   '.js': 'application/javascript',
   '.css': 'text/css',
   '.svg': 'image/svg+xml',
-  '.woff2': 'font/woff2'
+  '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
+  '.ttf': 'font/ttf',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.webp': 'image/webp'
 };
 
 export function createApp({addons=[], devIdentity=false, fetcher=fetch, root=resolve('build')}={}) {

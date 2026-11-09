@@ -1,18 +1,251 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Dialog, DialogHeader } from '@astryxdesign/core/Dialog';
 import { Button } from '@astryxdesign/core/Button';
+import { Badge } from '@astryxdesign/core/Badge';
+import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl';
 import { VStack } from '@astryxdesign/core/VStack';
 import { HStack } from '@astryxdesign/core/HStack';
 import { Text } from '@astryxdesign/core/Text';
 import { Heading } from '@astryxdesign/core/Heading';
 import { Icon } from '@astryxdesign/core/Icon';
-import { Check, RotateCcw, Palette, Layout as LayoutIcon, PlaySquare } from 'lucide-react';
+import { Check, RotateCcw, Type, Layout as LayoutIcon, PlaySquare, Sparkles } from 'lucide-react';
+import { NuvioPaletteIcon } from './Icons.jsx';
 import {
   PALETTES,
+  FONT_PRESETS,
   HOMEPAGE_LAYOUTS,
+  POSTER_SHAPES,
   PLAYER_STYLES,
-  DEFAULT_PREFERENCES
-} from './palettes';
+  DEFAULT_PREFERENCES,
+  applyPaletteToDOM
+} from './palettes.js';
+
+export function AppearanceContent({ currentPreferences, onApply }) {
+  const prefs = { ...DEFAULT_PREFERENCES, ...currentPreferences };
+  const selectedPalette = PALETTES.find((p) => p.id === prefs.palette) || PALETTES[0];
+
+  const update = (patch) => {
+    const next = { ...prefs, ...patch };
+    applyPaletteToDOM(next);
+    onApply(next);
+  };
+
+  const handleSelectPalette = (pal) => {
+    update({
+      palette: pal.id,
+      accent: pal.accent,
+      font: pal.defaultFont || prefs.font
+    });
+  };
+
+  const handleReset = () => {
+    applyPaletteToDOM(DEFAULT_PREFERENCES);
+    onApply(DEFAULT_PREFERENCES);
+  };
+
+  return (
+    <VStack gap={5} className="appearance-content">
+      {/* Live Active Theme Preview Banner */}
+      <div className="theme-live-banner">
+        <div className="theme-live-info">
+          <span className="theme-live-eyebrow">Active Theme · Changes apply instantly</span>
+          <strong className="theme-live-title">
+            {selectedPalette.name} · {FONT_PRESETS.find((f) => f.id === prefs.font)?.name || 'Nuvio Sans'}
+          </strong>
+          <span className="theme-live-sub">{selectedPalette.description}</span>
+        </div>
+        <div className="theme-live-swatches">
+          {selectedPalette.swatches.map((c, i) => (
+            <span key={i} className="theme-live-dot" style={{ backgroundColor: c }} />
+          ))}
+        </div>
+      </div>
+
+      {/* Colour Palette Picker */}
+      <VStack gap={2}>
+        <HStack gap={2} vAlign="center" hAlign="between">
+          <HStack gap={2} vAlign="center">
+            <NuvioPaletteIcon size={18} />
+            <Heading level={4}>Theme & Colour Palette</Heading>
+          </HStack>
+          <Badge variant="neutral" label={`${PALETTES.length} themes`} />
+        </HStack>
+        <div className="palette-picker-grid">
+          {PALETTES.map((pal) => {
+            const isSelected = prefs.palette === pal.id;
+            return (
+              <button
+                type="button"
+                key={pal.id}
+                className={`choice-card palette-card ${isSelected ? 'active' : ''}`}
+                onClick={() => handleSelectPalette(pal)}
+                aria-pressed={isSelected}
+              >
+                <div className="choice-card-top">
+                  <span className="card-category-pill">{pal.category}</span>
+                  {isSelected && <Check size={16} className="check-icon" />}
+                </div>
+                <span className="choice-title">{pal.name}</span>
+                <div className="swatch-strip">
+                  {pal.swatches.map((color, idx) => (
+                    <span
+                      key={idx}
+                      className="swatch-block"
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+                <span className="choice-desc">{pal.description}</span>
+              </button>
+            );
+          })}
+        </div>
+      </VStack>
+
+      {/* Accent Colour Swatches */}
+      {selectedPalette.accents && (
+        <VStack gap={2}>
+          <Heading level={4}>Accent Highlight</Heading>
+          <HStack gap={3} vAlign="center" wrap="wrap">
+            {selectedPalette.accents.map((acc) => {
+              const isSelected = prefs.accent?.toLowerCase() === acc.color.toLowerCase();
+              return (
+                <button
+                  type="button"
+                  key={acc.id}
+                  className={`accent-pill-btn ${isSelected ? 'active' : ''}`}
+                  onClick={() => update({ accent: acc.color })}
+                  aria-pressed={isSelected}
+                >
+                  <span className="accent-swatch-dot" style={{ backgroundColor: acc.color }} />
+                  <span>{acc.name}</span>
+                  {isSelected && <Check size={14} />}
+                </button>
+              );
+            })}
+          </HStack>
+        </VStack>
+      )}
+
+      {/* Typography Pairing */}
+      <VStack gap={2}>
+        <HStack gap={2} vAlign="center">
+          <Icon icon={Type} size="sm" />
+          <Heading level={4}>Typography Pairing</Heading>
+        </HStack>
+        <div className="layout-picker-grid">
+          {FONT_PRESETS.map((fp) => {
+            const isSelected = prefs.font === fp.id;
+            return (
+              <button
+                type="button"
+                key={fp.id}
+                className={`choice-card ${isSelected ? 'active' : ''}`}
+                onClick={() => update({ font: fp.id })}
+                aria-pressed={isSelected}
+              >
+                <div className="choice-card-top">
+                  <span className="card-category-pill">{fp.badge}</span>
+                  {isSelected && <Check size={16} className="check-icon" />}
+                </div>
+                <span className="choice-title" style={{ fontFamily: fp.heading }}>
+                  {fp.name}
+                </span>
+                <span className="choice-desc" style={{ fontFamily: fp.body }}>
+                  {fp.description}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </VStack>
+
+      {/* Catalog Poster Shape (Nuvio Portrait 2:3 vs Widescreen 16:9) */}
+      <VStack gap={2}>
+        <HStack gap={2} vAlign="center">
+          <Icon icon={Sparkles} size="sm" />
+          <Heading level={4}>Catalog Card Shape</Heading>
+        </HStack>
+        <SegmentedControl
+          label="Catalog card shape"
+          value={prefs.posterShape || 'poster'}
+          onChange={(val) => update({ posterShape: val })}
+        >
+          {POSTER_SHAPES.map((ps) => (
+            <SegmentedControlItem key={ps.id} value={ps.id} label={ps.name} />
+          ))}
+        </SegmentedControl>
+      </VStack>
+
+      {/* Homepage Layout Picker */}
+      <VStack gap={2}>
+        <HStack gap={2} vAlign="center">
+          <Icon icon={LayoutIcon} size="sm" />
+          <Heading level={4}>Homepage Layout</Heading>
+        </HStack>
+        <div className="layout-picker-grid">
+          {HOMEPAGE_LAYOUTS.map((l) => {
+            const isSelected = prefs.layout === l.id;
+            return (
+              <button
+                type="button"
+                key={l.id}
+                className={`choice-card ${isSelected ? 'active' : ''}`}
+                onClick={() => update({ layout: l.id })}
+                aria-pressed={isSelected}
+              >
+                <div className="choice-card-top">
+                  <span className="card-category-pill">{l.badge}</span>
+                  {isSelected && <Check size={16} className="check-icon" />}
+                </div>
+                <span className="choice-title">{l.name}</span>
+                <span className="choice-desc">{l.description}</span>
+              </button>
+            );
+          })}
+        </div>
+      </VStack>
+
+      {/* Player Controls Picker */}
+      <VStack gap={2}>
+        <HStack gap={2} vAlign="center">
+          <Icon icon={PlaySquare} size="sm" />
+          <Heading level={4}>Video Player Controls</Heading>
+        </HStack>
+        <div className="layout-picker-grid">
+          {PLAYER_STYLES.map((ps) => {
+            const isSelected = prefs.player === ps.id;
+            return (
+              <button
+                type="button"
+                key={ps.id}
+                className={`choice-card ${isSelected ? 'active' : ''}`}
+                onClick={() => update({ player: ps.id })}
+                aria-pressed={isSelected}
+              >
+                <div className="choice-card-top">
+                  <span className="card-category-pill">{ps.badge}</span>
+                  {isSelected && <Check size={16} className="check-icon" />}
+                </div>
+                <span className="choice-title">{ps.name}</span>
+                <span className="choice-desc">{ps.description}</span>
+              </button>
+            );
+          })}
+        </div>
+      </VStack>
+
+      <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap" className="appearance-actions">
+        <Button
+          variant="secondary"
+          label="Reset defaults"
+          icon={<Icon icon={RotateCcw} />}
+          onClick={handleReset}
+        />
+      </HStack>
+    </VStack>
+  );
+}
 
 export function AppearanceSettings({
   isOpen,
@@ -20,195 +253,31 @@ export function AppearanceSettings({
   onApply,
   onClose
 }) {
-  const [draft, setDraft] = useState(currentPreferences || DEFAULT_PREFERENCES);
-
-  const selectedPalette = PALETTES.find((p) => p.id === draft.palette) || PALETTES[0];
-
-  const handleSelectPalette = (palette) => {
-    const next = {
-      ...draft,
-      palette: palette.id,
-      accent: palette.accent
-    };
-    setDraft(next);
-    applyPreviewToDOM(next);
-  };
-
-  const handleSelectAccent = (color) => {
-    const next = { ...draft, accent: color };
-    setDraft(next);
-    applyPreviewToDOM(next);
-  };
-
-  const handleSelectLayout = (layoutId) => {
-    const next = { ...draft, layout: layoutId };
-    setDraft(next);
-    applyPreviewToDOM(next);
-  };
-
-  const handleSelectPlayer = (playerId) => {
-    const next = { ...draft, player: playerId };
-    setDraft(next);
-    applyPreviewToDOM(next);
-  };
-
-  const applyPreviewToDOM = (prefs) => {
-    document.documentElement.setAttribute('data-palette', prefs.palette);
-    document.documentElement.style.setProperty('--ls-accent', prefs.accent);
-  };
-
-  const handleSave = () => {
-    onApply(draft);
-    onClose();
-  };
-
-  const handleCancel = () => {
-    applyPreviewToDOM(currentPreferences);
-    setDraft(currentPreferences);
-    onClose();
-  };
-
-  const handleReset = () => {
-    setDraft(DEFAULT_PREFERENCES);
-    applyPreviewToDOM(DEFAULT_PREFERENCES);
-  };
-
   return (
     <Dialog
       isOpen={isOpen}
       onOpenChange={(open) => {
-        if (!open) handleCancel();
+        if (!open) onClose();
       }}
-      width="48rem"
+      width="50rem"
       maxHeight="90dvh"
       padding={4}
     >
       <DialogHeader
-        title="Appearance Settings"
+        title="Appearance & Themes"
         onOpenChange={(open) => {
-          if (!open) handleCancel();
+          if (!open) onClose();
         }}
       />
-
-      <VStack gap={5} className="dialog-scroll appearance-dialog-body">
-        <Text color="secondary">
-          Personalize your layout, video player controls, and colour theme. Your preferences are saved per profile.
-        </Text>
-
-        {/* Homepage Layout Picker */}
-        <VStack gap={2}>
-          <HStack gap={2} vAlign="center">
-            <Icon icon={LayoutIcon} size="sm" />
-            <Heading level={4}>Homepage Layout</Heading>
-          </HStack>
-          <div className="layout-picker-grid">
-            {HOMEPAGE_LAYOUTS.map((l) => (
-              <button
-                type="button"
-                key={l.id}
-                className={`choice-card ${draft.layout === l.id ? 'active' : ''}`}
-                onClick={() => handleSelectLayout(l.id)}
-              >
-                <HStack vAlign="center" hAlign="between" width="100%">
-                  <span className="card-badge">{l.badge}</span>
-                  {draft.layout === l.id && <Check size={18} className="check-icon" />}
-                </HStack>
-                <Heading level={4} className="choice-title">{l.name}</Heading>
-                <Text type="supporting" color="secondary">{l.description}</Text>
-              </button>
-            ))}
-          </div>
-        </VStack>
-
-        {/* Player Controls Picker */}
-        <VStack gap={2}>
-          <HStack gap={2} vAlign="center">
-            <Icon icon={PlaySquare} size="sm" />
-            <Heading level={4}>Player Controls Style</Heading>
-          </HStack>
-          <div className="layout-picker-grid">
-            {PLAYER_STYLES.map((ps) => (
-              <button
-                type="button"
-                key={ps.id}
-                className={`choice-card ${draft.player === ps.id ? 'active' : ''}`}
-                onClick={() => handleSelectPlayer(ps.id)}
-              >
-                <HStack vAlign="center" hAlign="between" width="100%">
-                  <span className="card-badge">{ps.badge}</span>
-                  {draft.player === ps.id && <Check size={18} className="check-icon" />}
-                </HStack>
-                <Heading level={4} className="choice-title">{ps.name}</Heading>
-                <Text type="supporting" color="secondary">{ps.description}</Text>
-              </button>
-            ))}
-          </div>
-        </VStack>
-
-        {/* Colour Palette Picker */}
-        <VStack gap={2}>
-          <HStack gap={2} vAlign="center">
-            <Icon icon={Palette} size="sm" />
-            <Heading level={4}>Colour Palette</Heading>
-          </HStack>
-          <div className="palette-picker-grid">
-            {PALETTES.map((pal) => (
-              <button
-                type="button"
-                key={pal.id}
-                className={`choice-card palette-card ${draft.palette === pal.id ? 'active' : ''}`}
-                onClick={() => handleSelectPalette(pal)}
-              >
-                <HStack vAlign="center" hAlign="between" width="100%">
-                  <span className="choice-title">{pal.name}</span>
-                  {draft.palette === pal.id && <Check size={18} className="check-icon" />}
-                </HStack>
-                <div className="swatch-strip">
-                  {pal.swatches.map((color, idx) => (
-                    <span key={idx} className="swatch-block" style={{ backgroundColor: color }} />
-                  ))}
-                </div>
-                <Text type="supporting" color="secondary">{pal.description}</Text>
-              </button>
-            ))}
-          </div>
-        </VStack>
-
-        {/* Accent Color Picker for selected palette */}
-        {selectedPalette.accents && (
-          <VStack gap={2}>
-            <Heading level={5}>Accent Colour</Heading>
-            <HStack gap={3} vAlign="center" wrap="wrap">
-              {selectedPalette.accents.map((acc) => (
-                <button
-                  type="button"
-                  key={acc.id}
-                  className={`accent-circle ${draft.accent === acc.color ? 'active' : ''}`}
-                  style={{ backgroundColor: acc.color }}
-                  title={acc.name}
-                  onClick={() => handleSelectAccent(acc.color)}
-                >
-                  {draft.accent === acc.color && <Check size={16} />}
-                </button>
-              ))}
-            </HStack>
-          </VStack>
-        )}
-
-        {/* Actions bar */}
-        <HStack gap={3} vAlign="center" hAlign="between" className="appearance-actions">
-          <Button
-            variant="ghost"
-            label="Reset defaults"
-            icon={<Icon icon={RotateCcw} />}
-            onClick={handleReset}
-          />
-          <HStack gap={2}>
-            <Button variant="ghost" label="Cancel" onClick={handleCancel} />
-            <Button variant="primary" label="Apply appearance" onClick={handleSave} />
-          </HStack>
-        </HStack>
-      </VStack>
+      <div className="dialog-scroll appearance-dialog-body">
+        <AppearanceContent
+          currentPreferences={currentPreferences}
+          onApply={onApply}
+        />
+        <div className="appearance-modal-footer">
+          <Button variant="primary" label="Done" onClick={onClose} />
+        </div>
+      </div>
     </Dialog>
   );
 }
