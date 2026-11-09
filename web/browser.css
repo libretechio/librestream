@@ -1194,6 +1194,10 @@ body {
 }
 
 /* Nuvio StreamCard Rows */
+.playback-actions > .astryx-button {
+  min-height: 2.75rem;
+}
+
 .source-results {
   display: flex;
   flex-direction: column;
@@ -1857,7 +1861,6 @@ body {
     width: 100%;
   }
 
-  .hero-actions > :first-child { grid-column: 1 / -1; }
   .hero-actions > * { min-height: 2.75rem; min-width: 0; }
   .hero-meta-top { gap: var(--spacing-1, 0.25rem); }
   .hero-synopsis { font-size: 0.85rem !important; }

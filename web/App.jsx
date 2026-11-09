@@ -436,12 +436,13 @@ function Search({ addons, onOpen }) {
   );
 }
 
-function TitleDialog({ item, addons, saved, onSave, onPlayStream, onClose }) {
+function TitleDialog({ item, addons, saved, onSave, onPlayStream, onClose, autoStart = false, initialPicker = false, addonsLoading = false }) {
+  const [selectingStream, setSelectingStream] = useState(false);
   const [meta, setMeta] = useState(item);
   const [loading, setLoading] = useState(true);
   const [season, setSeason] = useState('');
   const [selected, setSelected] = useState(
-    item.type !== 'series' ? { id: item.id } : null
+    item.playbackId ? { id: item.playbackId, playbackTitle: item.playbackTitle } : item.type !== 'series' ? { id: item.id } : null
   );
 
   useEffect(() => {
@@ -502,6 +503,7 @@ function TitleDialog({ item, addons, saved, onSave, onPlayStream, onClose }) {
           if (!open) onClose();
         }}
       />
+      {selectingStream && <Text type="supporting" color="secondary">Checking sources for your connection. Close this panel to cancel.</Text>}
       <VStack className="dialog-scroll" gap={4}>
         {/* Nuvio DetailHero Banner */}
         <div
@@ -556,14 +558,6 @@ function TitleDialog({ item, addons, saved, onSave, onPlayStream, onClose }) {
           )}
 
           <HStack gap={3} wrap="wrap">
-            {movie && (
-              <Button
-                icon={<NuvioPlayIcon size={16} />}
-                label="Find streams"
-                variant="primary"
-                onClick={() => setSelected({ id: meta.id })}
-              />
-            )}
             <Button
               variant="secondary"
               icon={<Icon icon={isSaved ? BookmarkCheck : Bookmark} />}
@@ -668,14 +662,18 @@ function TitleDialog({ item, addons, saved, onSave, onPlayStream, onClose }) {
           {selected && (
             <Sources
               addons={addons}
-              meta={meta}
+              meta={{ ...meta, runtime: selected.runtime || meta.runtime }}
               videoId={selected.id}
-              onPlay={(streamObj) =>
+              autoStart={autoStart}
+              initialPicker={initialPicker}
+              onSelectingChange={setSelectingStream}
+              addonsLoading={addonsLoading}
+              onPlay={(streamObj, selection) =>
                 onPlayStream(streamObj, {
                   ...meta,
                   playbackId: selected.id,
                   playbackTitle: selected.playbackTitle
-                })
+                }, selection)
               }
             />
           )}
@@ -688,9 +686,16 @@ function TitleDialog({ item, addons, saved, onSave, onPlayStream, onClose }) {
 export function App({ onThemeChange }) {
   const [user, setUser] = useState(null);
   const [addons, setAddons] = useState(null);
+  const [addonsLoading, setAddonsLoading] = useState(true);
   const [error, setError] = useState('');
   const [route, setRoute] = useState(location.hash.slice(1) || 'home');
   const [item, setItem] = useState(null);
+  const [playbackIntent, setPlaybackIntent] = useState(null);
+  const [alternatives, setAlternatives] = useState([]);
+  const openTitle = (target, intent = null) => {
+    setPlaybackIntent(intent);
+    setItem(target);
+  };
   const [expandedCatalog, setExpandedCatalog] = useState(null);
   const [activeStream, setActiveStream] = useState(null);
   const [playingMeta, setPlayingMeta] = useState(null);
@@ -703,6 +708,7 @@ export function App({ onThemeChange }) {
 
   async function boot() {
     setError('');
+    setAddonsLoading(true);
     try {
       const me = await api('/api/me');
       setUser(me);
@@ -742,6 +748,8 @@ export function App({ onThemeChange }) {
       }
     } catch (e) {
       setError(e.message);
+    } finally {
+      setAddonsLoading(false);
     }
   }
 
@@ -788,7 +796,8 @@ export function App({ onThemeChange }) {
     });
   };
 
-  const startPlayback = (streamObj, mediaMeta) => {
+  const startPlayback = (streamObj, mediaMeta, selection) => {
+    setAlternatives(selection?.alternatives || []);
     setActiveStream(streamObj);
     setPlayingMeta(mediaMeta);
     setItem(null);
@@ -824,10 +833,18 @@ export function App({ onThemeChange }) {
         user={user}
         playerStyle={preferences.player}
         onProgress={saveProgress}
-        onBack={() => setActiveStream(null)}
+        onBack={() => { setActiveStream(null); setAlternatives([]); }}
+        onFailure={(position) => {
+          if (!alternatives.length) return false;
+          setActiveStream(alternatives[0]);
+          setAlternatives(old => old.slice(1));
+          setPlayingMeta(old => ({ ...old, resumePosition: position || old.resumePosition }));
+          return true;
+        }}
         onSwitchSource={() => {
           setActiveStream(null);
-          setItem(playingMeta);
+          setAlternatives([]);
+          openTitle(playingMeta, 'choose');
         }}
       />
     );
@@ -953,7 +970,7 @@ export function App({ onThemeChange }) {
             }
             content={
               <LayoutContent>
-                <Search addons={addons} onOpen={setItem} />
+                <Search addons={addons} onOpen={openTitle} />
               </LayoutContent>
             }
           />
@@ -969,7 +986,7 @@ export function App({ onThemeChange }) {
             content={
               <LayoutContent>
                 {saved.length ? (
-                  <Shelf title="Saved titles" items={saved} grid onOpen={setItem} />
+                  <Shelf title="Saved titles" items={saved} grid onOpen={openTitle} />
                 ) : (
                   <VStack gap={3} className="page-section">
                     <Message>
@@ -1070,8 +1087,9 @@ export function App({ onThemeChange }) {
                 items={featuredItems}
                 item={featuredItems[0]}
                 layout={preferences.layout}
-                onPlay={(target) => setItem(target)}
-                onDetails={(target) => setItem(target)}
+                onPlay={(target) => openTitle(target, 'auto')}
+                onChooseStream={(target) => openTitle(target, 'choose')}
+                onDetails={(target) => openTitle(target)}
                 saved={saved}
                 onToggleSave={toggleSave}
               />
@@ -1114,7 +1132,7 @@ export function App({ onThemeChange }) {
               </button>
             </div>
 
-            {resume.length > 0 && <ContinueWatchingShelf items={resume} onOpen={setItem} />}
+            {resume.length > 0 && <ContinueWatchingShelf items={resume} onOpen={openTitle} />}
 
             {catalogs.map(({ a, c }, idx) => (
               <Catalog
@@ -1122,7 +1140,7 @@ export function App({ onThemeChange }) {
                 addon={a}
                 catalog={c}
                 shape={preferences.posterShape || 'poster'}
-                onOpen={setItem}
+                onOpen={openTitle}
                 onViewAll={setExpandedCatalog}
                 onFeaturedItems={idx < 3 ? handleFeaturedItems : undefined}
               />
@@ -1155,7 +1173,7 @@ export function App({ onThemeChange }) {
               grid
               onOpen={(picked) => {
                 setExpandedCatalog(null);
-                setItem(picked);
+                openTitle(picked);
               }}
             />
           </div>
@@ -1168,9 +1186,12 @@ export function App({ onThemeChange }) {
           key={(item.type || 'media') + ':' + item.id}
           item={item}
           addons={addons}
+          addonsLoading={addonsLoading}
           saved={saved}
           onSave={toggleSave}
           onPlayStream={startPlayback}
+          autoStart={playbackIntent === 'auto'}
+          initialPicker={playbackIntent === 'choose'}
           onClose={() => setItem(null)}
         />
       )}
