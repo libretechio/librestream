@@ -181,3 +181,72 @@ export function posterMetaLine(meta = {}) {
   if (runtime) bits.push(runtime);
   return bits.join(' · ');
 }
+
+// Bounded background read of the streams for a handful of visible titles, so the
+// poster strips have real data without the user opening every card.
+export const PREFETCH_LIMIT = 12;
+
+export function titlesNeedingAvailability(items, store, limit = PREFETCH_LIMIT) {
+  const out = [];
+  const seen = new Set();
+  for (const item of items) {
+    if (!item) continue;
+    const type = item.type || 'movie';
+    const key = type + ':' + item.id;
+    if (!item.id || seen.has(key) || store[key]) continue;
+    seen.add(key);
+    out.push({ key, type, id: item.id });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+export async function prefetchAvailability(targets, { addons, signal, onResult, concurrency = 2, timeoutMs = 7000 } = {}) {
+  const queue = [...targets];
+  const providers = (addons || []).filter(addon =>
+    addon.resources?.some(resource =>
+      typeof resource === 'string' ? resource === 'stream' : resource.name === 'stream'
+    )
+  );
+  if (!providers.length) return 0;
+
+  const readOne = async (target) => {
+    const results = await Promise.all(
+      providers.map(async (addon) => {
+        const url =
+          '/api/addon/' + addon.index + '/stream/' + encodeURIComponent(target.type) + '/' + encodeURIComponent(target.id);
+        const timer = setTimeout(() => {}, 0);
+        try {
+          const response = await fetch(url, { credentials: 'same-origin', signal });
+          if (!response.ok) return null;
+          const data = await response.json();
+          return Array.isArray(data.streams) ? data.streams : null;
+        } catch {
+          return null;
+        } finally {
+          clearTimeout(timer);
+        }
+      })
+    );
+    const streams = results.filter(Boolean).flat();
+    if (!streams.length) return false;
+    const availability = availabilityFromStreams(streams);
+    if (!availability.total) return false;
+    rememberAvailability(target.key, availability);
+    onResult?.(target.key, availability);
+    return true;
+  };
+
+  let done = 0;
+  const worker = async () => {
+    while (queue.length) {
+      if (signal?.aborted) return;
+      const target = queue.shift();
+      try {
+        if (await readOne(target)) done += 1;
+      } catch {}
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, targets.length) }, worker));
+  return done;
+}

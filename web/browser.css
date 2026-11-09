@@ -1099,15 +1099,18 @@ body {
   overflow: hidden;
   border: 1px solid var(--ls-line);
   background: var(--ls-card);
+  box-shadow: var(--ls-shadow);
   text-align: start;
   color: inherit;
   cursor: pointer;
   scroll-snap-align: start;
-  transition: border-color 0.14s ease;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease, transform 0.14s ease;
 }
 
 .continue-card:hover {
-  border-color: var(--ls-line-strong);
+  border-color: var(--ls-accent);
+  box-shadow: var(--ls-shadow-lift);
+  transform: translateY(-2px);
 }
 
 .continue-media-box {
@@ -1120,18 +1123,32 @@ body {
   overflow: hidden;
 }
 
-.continue-play-badge {
+.continue-media-box::after {
+  content: '';
   position: absolute;
-  right: var(--ls-2);
+  inset: 0;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.66) 0%, transparent 46%);
+}
+
+.continue-resume {
+  position: absolute;
+  left: var(--ls-2);
   bottom: var(--ls-2);
-  width: 1.75rem;
-  height: 1.75rem;
+  z-index: 2;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: var(--ls-1);
+  height: 1.375rem;
+  padding: 0 var(--ls-2);
   border-radius: var(--ls-radius-sm);
-  background: var(--ls-accent);
-  color: var(--ls-accent-ink);
+  background: color-mix(in srgb, #090707 74%, transparent);
+  border: 1px solid var(--ls-line-strong);
+  color: var(--ls-ink);
+  font-family: var(--ls-num);
+  font-size: var(--ls-text-2xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .continue-progress-track {
@@ -1139,7 +1156,7 @@ body {
   inset-inline: 0;
   bottom: 0;
   height: 2px;
-  background: rgba(255, 255, 255, 0.22);
+  background: color-mix(in srgb, var(--ls-ink) 22%, transparent);
 }
 
 .continue-progress-fill {
@@ -1999,12 +2016,13 @@ body {
   background: #000;
   z-index: 9999;
   overflow: hidden;
-  --ls-chrome-bg: rgba(9, 10, 12, 0.92);
-  --ls-chrome-line: rgba(255, 255, 255, 0.14);
-  --ls-chrome-text: rgba(255, 255, 255, 0.92);
-  --ls-chrome-muted: rgba(255, 255, 255, 0.55);
-  --ls-chrome-accent: var(--color-accent, #e8a91c);
-  --ls-chrome-on-accent: var(--color-on-accent, #111111);
+  --ls-chrome-bg: rgba(9, 7, 7, 0.92);
+  --ls-chrome-line: rgba(255, 255, 255, 0.16);
+  --ls-chrome-text: rgba(255, 255, 255, 0.94);
+  --ls-chrome-muted: rgba(255, 255, 255, 0.58);
+  --ls-chrome-accent: var(--color-accent, #c0524a);
+  --ls-chrome-on-accent: #ffffff;
+  --ls-chrome-num: var(--ls-num, 'JBSans', system-ui, sans-serif);
   --ls-tap: 2.75rem;
 }
 
@@ -2155,6 +2173,7 @@ body {
 }
 
 .ls-title {
+  font-family: var(--font-family-heading) !important;
   margin: 0 !important;
   color: #fff !important;
   font-size: 1rem !important;
@@ -2206,7 +2225,7 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: var(--ls-radius);
   cursor: pointer;
   position: relative;
   font-size: 0.78rem;
@@ -2363,6 +2382,7 @@ body {
   background: #16171b;
   border: 1px solid var(--ls-chrome-line);
   color: #fff;
+  font-family: var(--ls-chrome-num);
   font-size: 0.7rem;
   font-variant-numeric: tabular-nums;
   pointer-events: none;
@@ -2380,6 +2400,7 @@ body {
   align-items: baseline;
   gap: 0.3rem;
   margin-inline-start: 0.5rem;
+  font-family: var(--ls-chrome-num);
   font-size: 0.78rem;
   font-variant-numeric: tabular-nums;
   color: var(--ls-chrome-muted);
@@ -2415,7 +2436,8 @@ body {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--ls-chrome-line);
-  border-radius: 12px;
+  border-radius: var(--ls-radius-lg);
+  box-shadow: var(--ls-shadow);
   background: #121317;
   z-index: 31;
   overflow: hidden;
@@ -2460,7 +2482,7 @@ body {
   min-height: 40px;
   padding: 0.4rem 0.3rem;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--ls-radius-sm);
   background: transparent;
   color: var(--ls-chrome-muted);
   font-size: 0.72rem;
@@ -2506,7 +2528,7 @@ body {
   min-height: 44px;
   padding: 0.45rem 0.5rem;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--ls-radius-sm);
   background: transparent;
   color: var(--ls-chrome-text);
   text-align: start;

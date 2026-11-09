@@ -1,5 +1,15 @@
 # LibreStream validation
 
+## Round 5 — strip prefetch, player alignment, resume cards (2026-11-09, local only)
+
+Chosen by the user: prefetch the first visible titles, align the player to the approved system, and show resume time on continue-watching artwork.
+
+- `web/badges.js`: `titlesNeedingAvailability` and `prefetchAvailability`. Bounded to 12 titles, concurrency 2, one AbortController for the page lifetime, skipped titles already in the store. 3 unit tests.
+- `web/App.jsx`: prefetch effect keyed on the featured items, plus a resume-time label on continue-watching cards.
+- `web/browser.css`: player chrome now takes the Oxblood accent, 8px control radius, Figtree titles and JetBrains Sans timecodes; continue cards are 16:9 with a resume chip and progress bar.
+
+Measured: poster strips on the home route went from 3 to 9 within ~20s of load, with 8 titles in the availability store. Sample strips: `4K · DV · Atmos · 8 lang · cached`, `4K · HDR`. Player opened and played; play control is Oxblood `rgb(192,82,74)`, clock font JetBrains Sans. Build and 63 tests pass.
+
 ## Approved design pass — Oxblood (2026-11-09, local only)
 
 Ten decisions were taken from the user, each from a rendered mockup, before any app code changed. Mockups live in `mockups/` next to this file.

@@ -44,7 +44,9 @@ import {
   episodeSummary,
   runtimeLabel,
   availabilityBadges,
-  readAvailabilityStore
+  readAvailabilityStore,
+  titlesNeedingAvailability,
+  prefetchAvailability
 } from './badges.js';
 import {
   api,
@@ -330,20 +332,26 @@ function Shelf({
 
 function ContinueWatchingShelf({ items, onOpen }) {
   if (!items || !items.length) return null;
+  const remaining = (entry) => {
+    const left = Math.max(0, (entry.duration || 0) - (entry.position || 0));
+    if (!left) return '';
+    const minutes = Math.round(left / 60);
+    if (minutes < 60) return `${minutes}m left`;
+    return `${Math.floor(minutes / 60)}h ${minutes % 60}m left`;
+  };
   return (
     <section className="shelf continue-shelf">
       <div className="shelf-header">
         <div className="shelf-title-group">
-          <Heading level={2} className="shelf-heading">
-            Continue Watching
-          </Heading>
-          <span className="shelf-subtitle">Pick up right where you left off</span>
+          <Heading level={2} className="shelf-heading">Continue watching</Heading>
+          <span className="shelf-subtitle">{items.length} in progress</span>
         </div>
       </div>
       <ScrollRow label="Continue watching">
         {items.map((item) => {
           const pct = Math.min(100, Math.max(1, (item.position / (item.duration || 1)) * 100));
           const backdrop = safeURL(item.background || item.poster);
+          const left = remaining(item);
           return (
             <button
               type="button"
@@ -353,12 +361,11 @@ function ContinueWatchingShelf({ items, onOpen }) {
             >
               <div
                 className="continue-media-box"
-                style={{
-                  backgroundImage: backdrop ? `url(${backdrop})` : 'none'
-                }}
+                style={{ backgroundImage: backdrop ? `url(${backdrop})` : 'none' }}
               >
-                <span className="continue-play-badge" aria-hidden="true">
-                  <NuvioPlayIcon size={16} />
+                <span className="continue-resume">
+                  <NuvioPlayIcon size={13} />
+                  {left || 'Resume'}
                 </span>
                 <div className="continue-progress-track">
                   <div className="continue-progress-fill" style={{ width: `${pct}%` }} />
@@ -367,8 +374,7 @@ function ContinueWatchingShelf({ items, onOpen }) {
               <div className="continue-meta">
                 <span className="poster-title">{item.name || item.id}</span>
                 <span className="poster-sub">
-                  {item.playbackTitle || (item.releaseInfo ? `${item.releaseInfo} · ` : '')}
-                  {Math.round(pct)}% watched
+                  {item.playbackTitle || item.releaseInfo || `${Math.round(pct)}% watched`}
                 </span>
               </div>
             </button>
@@ -1046,6 +1052,31 @@ export function App({ onThemeChange }) {
   const handleFeaturedItems = (incoming) => {
     setFeaturedItems((old) => dedupe([...old, ...incoming]).slice(0, 8));
   };
+
+  // Fill poster strips for the first visible titles. One controller for the page
+  // lifetime, so a re-render never cancels a run half way.
+  const prefetchRef = useRef({ controller: null, seen: new Set() });
+  useEffect(() => {
+    if (!addons?.length || !featuredItems.length) return;
+    if (!prefetchRef.current.controller) prefetchRef.current.controller = new AbortController();
+    const controller = prefetchRef.current.controller;
+    const timer = setTimeout(() => {
+      if (controller.signal.aborted) return;
+      const targets = titlesNeedingAvailability(featuredItems.slice(0, 16), readAvailabilityStore(), 12)
+        .filter((target) => !prefetchRef.current.seen.has(target.key));
+      if (!targets.length) return;
+      targets.forEach((target) => prefetchRef.current.seen.add(target.key));
+      prefetchAvailability(targets, {
+        addons,
+        signal: controller.signal,
+        concurrency: 2,
+        onResult: () => setAvailabilityStore(readAvailabilityStore())
+      }).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [addons, featuredItems]);
+
+  useEffect(() => () => prefetchRef.current.controller?.abort(), []);
 
   const allCatalogs = (addons || []).flatMap((a) =>
     (a.catalogs || [])
