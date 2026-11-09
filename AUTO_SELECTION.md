@@ -1,6 +1,6 @@
 # Automatic stream selection
 
-Implemented for release v0.4.0 on `feat/automatic-stream-selection`. Release publication and production reconciliation are verified separately.
+Implemented in v0.4.0, with private registry packaging corrected in v0.4.1. Release publication and production reconciliation are verified separately.
 
 ## Behaviour
 
@@ -25,7 +25,7 @@ Playlist variants, segments, maps and encryption-key URLs are rewritten to opaqu
 
 ## Verification on 2026-11-09
 
-- Production build and Astryx built-output checks pass. **35 automated tests pass.** Coverage includes quality versus bandwidth, cache/codec exclusions, duplicate delivery URLs, HTML rejection, partial samples, cancellation, discovery timing, Data Saver, fixed/adaptive HLS, byte caps and identity isolation.
+- Production build and Astryx built-output checks pass. **36 automated tests pass.** Coverage includes quality versus bandwidth, cache/codec exclusions, duplicate delivery URLs, HTML rejection, partial samples, cancellation, discovery timing, Data Saver, fixed/adaptive HLS, byte caps, identity isolation and safe public registry defaults.
 - In a synthetic browser playback lab, the highest-ranked source deliberately returned a playback error. The player switched to the checked 720p alternative and played video. Request logs showed no request to the known uncached fixture URL.
 - Synthetic MP4 and HLS played. Episode selection used the chosen episode. Choose stream opened the manual list; manually chosen video played without an Auto label. Cancellation left a usable picker. An all-failed case exposed the manual list instead of leaving the user waiting.
 - A simulated media error at 14 seconds switched sources and resumed at 14.4 seconds. This is an injected error test, not a real-provider mid-film failure.
@@ -39,6 +39,8 @@ A short transfer sample is an estimate, not a guarantee of sustained bandwidth o
 
 Local preview: http://127.0.0.1:4173/. Test-only synthetic media occupies about 7.6 MiB under `.private/auto-media` on `/home`. The disposable lab uses `tests/auto-preview.mjs` and loopback ports 4175/4176; it is stopped after validation. Runtime addon configuration was not changed. Local build output, logs and browser-local test progress were written.
 
-Rollback reference: the published v0.3.1 release and `origin/main`. Preserve the feature working tree before restoring that source and rebuilding the local preview.
+Public source and release archives contain only the public Cinemeta default. Production reads the shared registry from the SOPS-encrypted `librestream-addons` Secret mounted at `/etc/librestream/addons.json`. The local private runtime registry remains unchanged. Older Git history and release copies may still contain previously published addon configuration URLs; this packaging change does not revoke those URLs or purge history.
+
+Rollback reference: the published v0.3.1 application release, retaining the private registry mount and `LIBRESTREAM_ADDONS_FILE` setting. Preserve the feature working tree before restoring older source and rebuilding the local preview.
 
 References: [Network Information API](https://developer.mozilla.org/en-US/docs/Web/API/NetworkInformation), [browser media capability reporting](https://developer.mozilla.org/en-US/docs/Web/API/MediaCapabilities/decodingInfo), [Stremio stream response protocol](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/api/responses/stream.md).
