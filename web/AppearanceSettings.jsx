@@ -33,8 +33,7 @@ export function AppearanceContent({ currentPreferences, onApply }) {
   const handleSelectPalette = (pal) => {
     update({
       palette: pal.id,
-      accent: pal.accent,
-      font: pal.defaultFont || prefs.font
+      accent: pal.accent
     });
   };
 

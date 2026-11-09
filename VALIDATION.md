@@ -84,3 +84,13 @@ Private runtime addon registry: ~/.config/libretech/librestream/addons.json, mod
 Previous source snapshot: ../backups/librestream-tv-source-before-rewrite.tar.gz, mode 600. The original /tmp working directories were preserved. Existing production artifacts remain unchanged; no production rollback is required.
 
 Local previews run on loopback ports 4173 (real configured addons) and 4174 (explicit fixture). No public route was created.
+## v0.3.1 mobile follow-up (2026-11-09)
+
+Palette selection preserves the independently chosen typography. Hero actions use two rows on phones; pager buttons, arrows, catalogue filters and See all have 44 CSS pixel touch targets. The appearance dialog has more vertical room and its preview wraps on narrow screens. Page bottom spacing includes the device safe area. Desktop navigation waits until 64rem; theme and profile labels wait until 75rem, avoiding the observed off-screen header controls at 768px.
+
+Removed invented hero age certifications and the unconditional Instant Streams claim. Missing metadata stays absent. Account copy now describes browser-local storage rather than cross-device sync.
+
+Browser evidence: at a 320px viewport, hero height decreased from 488 to 418 CSS pixels; sampled action and pager targets measured 44px high. Catalogue rails remained a single horizontal row (237px scrollHeight and clientHeight with 3252px horizontal content). See all opened a grid without page overflow. Palette switching retained the selected Jakarta body font; the bundled font loaded successfully. Light and dark palettes, pager selection and the appearance close control worked locally.
+
+Production validation is separate: the saved Kubernetes API connection timed out during this follow-up. GitOps publication alone does not establish production reconciliation or authenticated phone playback. Rollback is the previous v0.3.0 release pin. Existing validation entries below describe historical checks, not this release's production status.
+

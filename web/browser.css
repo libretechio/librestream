@@ -282,7 +282,7 @@ body {
 }
 
 .app-main {
-  padding-bottom: calc(var(--ls-nav-height) + 2.5rem);
+  padding-bottom: calc(var(--ls-nav-height) + 2.5rem + env(safe-area-inset-bottom));
   width: 100%;
   min-width: 0;
 }
@@ -566,34 +566,51 @@ body {
 .hero-dots {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  gap: 0;
 }
 
 .hero-dot {
-  height: 0.45rem;
-  width: 0.45rem;
+  position: relative;
+  flex: 0 0 2.75rem;
+  height: 2.75rem;
+  width: 2.75rem;
   border-radius: 9999px;
   border: none;
   padding: 0;
-  background: color-mix(in srgb, var(--color-text-primary) 32%, transparent);
+  background: transparent;
   cursor: pointer;
   transition: width 0.22s ease, background-color 0.22s ease;
 }
 
-.hero-dot.active {
-  width: 1.65rem;
+.hero-dot::after {
+  content: "";
+  position: absolute;
+  inset: calc(50% - 0.2rem) auto auto calc(50% - 0.2rem);
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: var(--radius-full, 50%);
+  background: var(--color-text-secondary);
+}
+
+.hero-dot.active::after {
+  width: 1.25rem;
+  left: calc(50% - 0.625rem);
   background: var(--color-accent);
 }
 
 .hero-pager-arrows {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 0.35rem;
 }
 
 .hero-arrow-btn {
-  width: 2.25rem;
-  height: 2.25rem;
+  width: 2.75rem;
+  height: 2.75rem;
   border-radius: 50%;
   border: 1px solid var(--color-border-emphasized);
   background: color-mix(in srgb, var(--color-background-card) 82%, transparent);
@@ -627,7 +644,7 @@ body {
 }
 
 .filter-pill {
-  min-height: 2.35rem;
+  min-height: 2.75rem;
   padding: 0.38rem 0.9rem;
   border-radius: 9999px;
   background: var(--color-background-surface);
@@ -694,7 +711,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.2rem;
-  min-height: 2.25rem;
+  min-height: 2.75rem;
   padding: 0.3rem 0.7rem;
   border-radius: 9999px;
   background: var(--color-background-surface);
@@ -1413,7 +1430,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  min-height: 2.5rem;
+  min-height: 2.75rem;
   padding: 0.35rem 0.75rem;
   border-radius: 9999px;
   background: var(--color-background-card);
@@ -1691,7 +1708,7 @@ body {
   border: none;
   color: #fff;
   min-width: 2.35rem;
-  min-height: 2.35rem;
+  min-height: 2.75rem;
   border-radius: 0.45rem;
   display: inline-flex;
   align-items: center;
@@ -1832,6 +1849,26 @@ body {
 /* =========================================================================
    RESPONSIVE BREAKPOINTS (Tablet >= 640px, Desktop >= 768px, Wide >= 1200px)
    ========================================================================= */
+@media (max-width: 39.999rem) {
+  .hero-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--spacing-2, 0.5rem);
+    width: 100%;
+  }
+
+  .hero-actions > :first-child { grid-column: 1 / -1; }
+  .hero-actions > * { min-height: 2.75rem; min-width: 0; }
+  .hero-meta-top { gap: var(--spacing-1, 0.25rem); }
+  .hero-synopsis { font-size: 0.85rem !important; }
+  .theme-live-banner { flex-wrap: wrap; }
+  .appearance-content h4 { overflow-wrap: anywhere; }
+  .astryx-dialog:has(.appearance-dialog-body) {
+    padding: var(--spacing-3, 0.75rem);
+    max-height: calc(100dvh - 1.5rem);
+  }
+}
+
 @media (min-width: 40rem) {
   .poster-card-portrait.poster-card-rail {
     flex: 0 0 9.25rem;
@@ -1854,23 +1891,6 @@ body {
 @media (min-width: 48rem) {
   .nuvio-top-bar {
     padding: 0.75rem 2rem;
-  }
-
-  .desktop-nav-pills {
-    display: inline-flex;
-  }
-
-  .header-theme-label,
-  .header-user-name {
-    display: inline;
-  }
-
-  .app-nav {
-    display: none;
-  }
-
-  .app-main {
-    padding-bottom: 3rem;
   }
 
   .ls-hero-stage {
@@ -1908,7 +1928,20 @@ body {
   }
 }
 
+@media (min-width: 64rem) {
+  .desktop-nav-pills { display: inline-flex; }
+  .app-nav { display: none; }
+  .app-main { padding-bottom: 3rem; }
+}
+
 @media (min-width: 75rem) {
+  .header-theme-label,
+  .header-user-name { display: inline; }
+  .header-theme-label {
+    max-width: 9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .poster-grid {
     grid-template-columns: repeat(auto-fill, minmax(10.25rem, 1fr));
   }

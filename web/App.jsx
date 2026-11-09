@@ -1019,7 +1019,7 @@ export function App({ onThemeChange }) {
                     <VStack gap={1}>
                       <Heading level={3}>{user?.name || 'Authenticated User'}</Heading>
                       <Text type="supporting" color="secondary">
-                        Authentik SSO profile · Watchlist, resume points, and theme synced to your identity
+                        Signed in with Authentik. Watchlist, resume points and appearance are saved in this browser for your account.
                       </Text>
                     </VStack>
                   </div>

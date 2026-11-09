@@ -38,12 +38,12 @@ export function HeroBanner({
   const year = active.year || active.releaseInfo;
   const runtime = active.runtime;
   const typeLabel = active.type === 'series' ? 'Series' : 'Movie';
-  const ageRating = active.certification || active.ageRating || (active.type === 'series' ? 'TV-14' : 'PG-13');
+  const ageRating = active.certification || active.ageRating;
   const genres = Array.isArray(active.genres) ? active.genres.slice(0, 3) : [];
   const description =
     active.description ||
     active.synopsis ||
-    'Stream instantly across your configured addons with TorBox cache detection and adaptive playback.';
+    '';
   const isSaved =
     typeof isSavedProp === 'boolean'
       ? isSavedProp
@@ -121,13 +121,13 @@ export function HeroBanner({
                   <span className="hero-fact-item">{runtime}</span>
                 </>
               )}
-              <span className="hero-fact-dot" aria-hidden="true" />
-              <span className="hero-fact-item hero-fact-ready">Instant Streams</span>
             </div>
 
-            <Text className="hero-synopsis" maxLines={3}>
-              {description}
-            </Text>
+            {description && (
+              <Text className="hero-synopsis" maxLines={2}>
+                {description}
+              </Text>
+            )}
 
             {/* Primary CTA bar */}
             <HStack gap={3} vAlign="center" wrap="wrap" className="hero-actions">
@@ -139,7 +139,7 @@ export function HeroBanner({
               />
               <Button
                 variant="secondary"
-                label="Details & episodes"
+                label="Details"
                 icon={<Icon icon={Info} />}
                 onClick={() => onDetails(active)}
               />
@@ -169,15 +169,14 @@ export function HeroBanner({
         {/* Multi-slide Hero Pager Controls (Nuvio HomeHeroSection pill indicator) */}
         {slides.length > 1 && (
           <div className="hero-pager-bar">
-            <div className="hero-dots" role="tablist" aria-label="Featured slides">
+            <div className="hero-dots" role="group" aria-label="Featured slides">
               {slides.map((s, idx) => {
                 const isCurrent = idx === index;
                 return (
                   <button
                     key={(s.type || 'm') + ':' + s.id}
                     type="button"
-                    role="tab"
-                    aria-selected={isCurrent}
+                    aria-pressed={isCurrent}
                     aria-label={`Featured: ${s.name || s.title || idx + 1}`}
                     className={`hero-dot ${isCurrent ? 'active' : ''}`}
                     onClick={() => setIndex(idx)}
