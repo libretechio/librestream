@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@astryxdesign/core/Button';
 import { Icon } from '@astryxdesign/core/Icon';
 import { HStack } from '@astryxdesign/core/HStack';
-import { Text } from '@astryxdesign/core/Text';
 import { Heading } from '@astryxdesign/core/Heading';
 import {
   ArrowLeft,
@@ -17,14 +16,16 @@ import {
   Subtitles,
   Languages,
   Gauge,
-  Signal,
   Check,
   Layers,
   PictureInPicture,
+  RectangleHorizontal,
   X
 } from 'lucide-react';
 import { safeURL, readState, writeState } from './api';
 import { fetchSubtitles, mergeSubtitleTracks, languageName } from './subtitles.js';
+import { SubtitleLayer } from './SubtitleLayer.jsx';
+import { pictureRect, FIT_CSS } from './picture.js';
 
 function formatTime(seconds) {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
@@ -35,16 +36,27 @@ function formatTime(seconds) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-const CUE_SIZES = { small: '0.85em', medium: '1.05em', large: '1.35em' };
+const FITS = {
+  fit: { label: 'Fit', hint: 'Whole picture, bars where needed', css: FIT_CSS.fit },
+  fill: { label: 'Fill', hint: 'Crops the edges to fill the screen', css: FIT_CSS.fill },
+  stretch: { label: 'Stretch', hint: 'Distorts to fill the screen', css: FIT_CSS.stretch }
+};
+const ZOOMS = [1, 1.1, 1.25, 1.5];
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+const SUB_SCALES = { small: 0.82, medium: 1, large: 1.22 };
+const SUB_OFFSETS = { low: 0.03, standard: 0.09, high: 0.2 };
 
-function readCueSize() {
+function readPref(key, fallback, allowed) {
   try {
-    const value = localStorage.getItem('librestream:cue_size');
-    return CUE_SIZES[value] ? value : 'medium';
+    const value = localStorage.getItem('librestream:' + key);
+    return value && (!allowed || allowed.includes(value)) ? value : fallback;
   } catch {
-    return 'medium';
+    return fallback;
   }
+}
+
+function writePref(key, value) {
+  try { localStorage.setItem('librestream:' + key, value); } catch {}
 }
 
 export function Player({
@@ -59,8 +71,10 @@ export function Player({
   onFailure,
   onSwitchSource
 }) {
-  const videoRef = useRef(null);
   const containerRef = useRef(null);
+  const videoRef = useRef(null);
+  const stageRef = useRef(null);
+  const chromeRef = useRef(null);
   const hideTimerRef = useRef(null);
   const hlsRef = useRef(null);
 
@@ -76,23 +90,27 @@ export function Player({
   const [needsGesture, setNeedsGesture] = useState(false);
   const [isBuffering, setIsBuffering] = useState(true);
   const [controlsVisible, setControlsVisible] = useState(true);
-  const [activePanel, setActivePanel] = useState(null); // 'tracks' | 'speed' | 'quality'
+  const [activePanel, setActivePanel] = useState(null); // 'tracks' | 'picture' | 'speed'
   const [addonSubs, setAddonSubs] = useState([]);
   const [builtinSubs, setBuiltinSubs] = useState([]);
   const [subsLoading, setSubsLoading] = useState(false);
   const [subsNotice, setSubsNotice] = useState('');
   const [activeSubId, setActiveSubId] = useState('off');
+  const [activeTrack, setActiveTrack] = useState(null);
   const [audioTracks, setAudioTracks] = useState([]);
   const [activeAudio, setActiveAudio] = useState(-1);
   const [levels, setLevels] = useState([]);
   const [activeLevel, setActiveLevel] = useState(-1);
-  const [cueSize, setCueSize] = useState(readCueSize);
+  const [subScale, setSubScale] = useState(() => readPref('sub_scale', 'medium', Object.keys(SUB_SCALES)));
+  const [subOffset, setSubOffset] = useState(() => readPref('sub_offset', 'standard', Object.keys(SUB_OFFSETS)));
+  const [fit, setFit] = useState(() => readPref('fit', 'fit', Object.keys(FITS)));
+  const [zoom, setZoom] = useState(() => Number(readPref('zoom', '1')) || 1);
+  const [picture, setPicture] = useState(null);
+  const [chromeHeight, setChromeHeight] = useState(0);
+  const [scrub, setScrub] = useState(null);
   const [doubleTapFeedback, setDoubleTapFeedback] = useState(null);
 
-  const subtitleTracks = useMemo(
-    () => mergeSubtitleTracks(builtinSubs, addonSubs),
-    [builtinSubs, addonSubs]
-  );
+  const subtitleTracks = useMemo(() => mergeSubtitleTracks(builtinSubs, addonSubs), [builtinSubs, addonSubs]);
 
   const wakeControls = () => {
     setControlsVisible(true);
@@ -137,14 +155,11 @@ export function Player({
     const readAudioTracks = () => {
       if (!active) return;
       if (hls?.audioTracks?.length) {
-        setAudioTracks(
-          hls.audioTracks.map((track, index) => ({
-            index,
-            label: track.name || track.lang || `Track ${index + 1}`,
-            language: languageName(track.lang || track.name),
-            current: hls.audioTrack === index
-          }))
-        );
+        setAudioTracks(hls.audioTracks.map((track, index) => ({
+          index,
+          label: track.name || track.lang || `Track ${index + 1}`,
+          language: languageName(track.lang || track.name)
+        })));
         setActiveAudio(hls.audioTrack);
         return;
       }
@@ -156,11 +171,13 @@ export function Player({
           list.push({
             index,
             label: track.label || track.language || `Track ${index + 1}`,
-            language: languageName(track.language),
-            current: Boolean(track.enabled)
+            language: languageName(track.language)
           });
         }
         setAudioTracks(list);
+        for (let index = 0; index < native.length; index += 1) {
+          if (native[index].enabled) setActiveAudio(index);
+        }
       }
     };
 
@@ -258,7 +275,8 @@ export function Player({
         const Hls = (await import('hls.js')).default;
         if (!active) return;
         if (!Hls.isSupported()) return handleError();
-        hls = new Hls({ enableWorker: true, capLevelToPlayerSize: Boolean(stream.autoSelection) });
+        // Cues are painted by the app, so hls.js must not paint them too.
+        hls = new Hls({ enableWorker: true, capLevelToPlayerSize: Boolean(stream.autoSelection), subtitleDisplay: false });
         hlsRef.current = hls;
         if (stream.autoSelection?.saveData) {
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -274,15 +292,13 @@ export function Player({
         });
         hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
           if (!active) return;
-          setBuiltinSubs(
-            hls.subtitleTracks.map((track, index) => ({
-              kind: 'builtin',
-              index,
-              lang: String(track.lang || 'und').toLowerCase(),
-              language: track.name || languageName(track.lang),
-              addon: 'Stream'
-            }))
-          );
+          setBuiltinSubs(hls.subtitleTracks.map((track, index) => ({
+            kind: 'builtin',
+            index,
+            lang: String(track.lang || 'und').toLowerCase(),
+            language: track.name || languageName(track.lang),
+            addon: 'Stream'
+          })));
         });
         hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, readAudioTracks);
         hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, readAudioTracks);
@@ -338,25 +354,28 @@ export function Player({
     return () => controller.abort();
   }, [stream, addons, meta.type, meta.id, videoId]);
 
-  // Track modes are imperative: the default attribute never updates after mount.
+  // Tracks are kept hidden: the app paints the cues itself.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     const tracks = video.textTracks;
+    let chosen = null;
     for (let index = 0; index < tracks.length; index += 1) {
       const track = tracks[index];
-      track.mode = activeSubId !== 'off' && track.id === activeSubId ? 'showing' : 'disabled';
+      const selected = activeSubId !== 'off' && track.id === activeSubId;
+      track.mode = selected ? 'hidden' : 'disabled';
+      if (selected) chosen = track;
     }
-  }, [activeSubId, addonSubs]);
+    setActiveTrack(chosen);
+  }, [activeSubId, addonSubs, builtinSubs]);
 
   useEffect(() => {
     const hls = hlsRef.current;
     if (!hls) return;
     if (activeSubId.startsWith('builtin:')) {
-      hls.subtitleDisplay = true;
-      hls.subtitleTrack = Number(activeSubId.split(':')[1]);
+      const index = Number(activeSubId.split(':')[1]);
+      if (hls.subtitleTrack !== index) hls.subtitleTrack = index;
     } else if (hls.subtitleTrack !== -1) {
-      hls.subtitleDisplay = false;
       hls.subtitleTrack = -1;
     }
   }, [activeSubId]);
@@ -374,9 +393,45 @@ export function Player({
     for (let index = 0; index < native.length; index += 1) native[index].enabled = index === activeAudio;
   }, [activeAudio]);
 
+  useEffect(() => { writePref('sub_scale', subScale); }, [subScale]);
+  useEffect(() => { writePref('sub_offset', subOffset); }, [subOffset]);
+  useEffect(() => { writePref('fit', fit); }, [fit]);
+  useEffect(() => { writePref('zoom', String(zoom)); }, [zoom]);
+
+  // Track the picture rect and the chrome height so cues land inside the picture.
   useEffect(() => {
-    try { localStorage.setItem('librestream:cue_size', cueSize); } catch {}
-  }, [cueSize]);
+    const stage = stageRef.current;
+    const video = videoRef.current;
+    if (!stage) return;
+    const update = () => {
+      const box = stage.getBoundingClientRect();
+      setPicture(pictureRect(box.width, box.height, video?.videoWidth, video?.videoHeight, fit, zoom));
+      setChromeHeight(chromeRef.current?.getBoundingClientRect().height || 0);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(stage);
+    if (chromeRef.current) observer.observe(chromeRef.current);
+    video?.addEventListener('loadedmetadata', update);
+    video?.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+    return () => {
+      observer.disconnect();
+      video?.removeEventListener('loadedmetadata', update);
+      video?.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
+    };
+  }, [fit, zoom, controlsVisible]);
+
+  useEffect(() => {
+    const sync = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', sync);
+    document.addEventListener('webkitfullscreenchange', sync);
+    return () => {
+      document.removeEventListener('fullscreenchange', sync);
+      document.removeEventListener('webkitfullscreenchange', sync);
+    };
+  }, []);
 
   const toggleSubtitleShortcut = () => {
     if (activeSubId !== 'off') return setActiveSubId('off');
@@ -436,6 +491,13 @@ export function Player({
           e.preventDefault();
           toggleSubtitleShortcut();
           break;
+        case 'a':
+          e.preventDefault();
+          setFit((current) => {
+            const keys = Object.keys(FITS);
+            return keys[(keys.indexOf(current) + 1) % keys.length];
+          });
+          break;
         case 'escape':
           if (activePanel) {
             e.preventDefault();
@@ -472,16 +534,22 @@ export function Player({
 
   const toggleFullscreen = async () => {
     const container = containerRef.current;
-    if (!container) return;
+    const video = videoRef.current;
+    if (!container || !video) return;
     try {
-      if (!document.fullscreenElement) {
-        await container.requestFullscreen();
-        setIsFullscreen(true);
-      } else {
+      if (document.fullscreenElement) {
         await document.exitFullscreen();
-        setIsFullscreen(false);
+        return;
       }
-    } catch {}
+      if (container.requestFullscreen) {
+        await container.requestFullscreen();
+        return;
+      }
+      // iOS Safari exposes fullscreen on the media element only.
+      if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+    } catch {
+      if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+    }
   };
 
   const togglePiP = async () => {
@@ -528,75 +596,97 @@ export function Player({
   const activeSub = subtitleTracks.find(track =>
     activeSubId === (track.kind === 'addon' ? track.id : `builtin:${track.index}`)
   );
-  const audioCount = audioTracks.length;
   const addonTracks = subtitleTracks.filter(track => track.kind === 'addon');
+  const played = duration ? (currentTime / duration) * 100 : 0;
+  const bufferedPct = duration ? Math.min(100, (buffered / duration) * 100) : 0;
+
+  // Cues sit above the control bar when it is showing, and stay inside the picture.
+  const cueInset = picture
+    ? controlsVisible && chromeHeight
+      ? Math.max(chromeHeight + 18, picture.height * SUB_OFFSETS[subOffset])
+      : Math.max(18, picture.height * SUB_OFFSETS[subOffset])
+    : 0;
 
   const openPanel = (panel) => {
     setActivePanel(activePanel === panel ? null : panel);
     setControlsVisible(true);
   };
 
-  const panelButton = (panel, label, icon) => (
+  const panelTab = (panel, label, Glyph) => (
     <button
       type="button"
-      className={`track-tab ${activePanel === panel ? 'active' : ''}`}
+      className="ls-tab"
       aria-pressed={activePanel === panel}
       onClick={() => openPanel(panel)}
     >
-      <Icon icon={icon} />
+      <Glyph size={15} />
       <span>{label}</span>
     </button>
   );
 
+  const timelinePointer = (event) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (event.clientX - box.left) / box.width));
+    return { ratio, time: ratio * duration };
+  };
+
   return (
     <div
       ref={containerRef}
-      className={`ls-player-viewport ${controlsVisible ? 'controls-active' : 'controls-hidden'} player-${playerStyle}`}
+      className={`ls-player ${controlsVisible ? 'is-awake' : 'is-idle'} player-${playerStyle}`}
+      data-fit={fit}
       onMouseMove={wakeControls}
       onTouchStart={wakeControls}
       onTouchEnd={handleTouchEnd}
       onDoubleClick={toggleFullscreen}
     >
-      <video
-        ref={videoRef}
-        id="video"
-        className="ls-video-canvas"
-        playsInline
-        preload="auto"
-        onClick={togglePlay}
-        style={{ '--ls-cue-size': CUE_SIZES[cueSize] }}
-      >
-        {addonTracks
-          .filter(track => safeURL(track.url))
-          .map(track => (
-            <track
-              key={track.id}
-              id={track.id}
-              kind="subtitles"
-              src={track.url}
-              srcLang={track.lang || 'und'}
-              label={track.language}
-            />
-          ))}
-      </video>
+      <div className="ls-stage" ref={stageRef}>
+        <video
+          ref={videoRef}
+          id="video"
+          className="ls-video"
+          playsInline
+          preload="auto"
+          onClick={togglePlay}
+          style={{ objectFit: FITS[fit].css, transform: `scale(${zoom})` }}
+        >
+          {addonTracks
+            .filter(track => safeURL(track.url))
+            .map(track => (
+              <track
+                key={track.id}
+                id={track.id}
+                kind="subtitles"
+                src={track.url}
+                srcLang={track.lang || 'und'}
+                label={track.language}
+              />
+            ))}
+        </video>
+        <SubtitleLayer
+          track={activeTrack}
+          rect={picture}
+          bottomInset={cueInset}
+          scale={SUB_SCALES[subScale]}
+        />
+      </div>
 
       {isBuffering && (
-        <div className="player-buffering-indicator" aria-label="Buffering stream">
-          <div className="ls-spinner" />
-          <Text color="secondary">Buffering…</Text>
+        <div className="ls-buffering" aria-label="Buffering stream">
+          <span className="ls-spinner" />
         </div>
       )}
 
       {doubleTapFeedback && (
-        <div className={`double-tap-ripple ${doubleTapFeedback}`}>
-          <Text type="heading-3">{doubleTapFeedback === 'left' ? '⟪ 10s' : '10s ⟫'}</Text>
+        <div className={`ls-tap ${doubleTapFeedback}`} aria-hidden="true">
+          {doubleTapFeedback === 'left' ? '−10s' : '+10s'}
         </div>
       )}
 
       {feedback && (
-        <div className="player-feedback-overlay" role={needsGesture ? 'status' : 'alert'}>
-          <Text type="body">{feedback}</Text>
-          <HStack gap={2} vAlign="center" className="player-feedback-actions">
+        <div className="ls-notice" role={needsGesture ? 'status' : 'alert'}>
+          <p className="ls-notice-text">{feedback}</p>
+          <HStack gap={2} vAlign="center">
             {needsGesture && <Button variant="primary" label="Play" icon={<Icon icon={Play} />} onClick={togglePlay} />}
             <Button variant="primary" label="Choose stream" icon={<Icon icon={Layers} />} onClick={() => onSwitchSource?.()} />
             <Button variant="ghost" label="Go back" icon={<Icon icon={ArrowLeft} />} onClick={onBack} />
@@ -604,82 +694,79 @@ export function Player({
         </div>
       )}
 
-      <header className="player-top-overlay">
-        <div className="player-top-content">
-          <button type="button" className="player-icon-btn" aria-label="Back" onClick={onBack}>
-            <ArrowLeft size={20} />
-          </button>
-          <div className="player-title-block">
-            <Heading level={3} className="player-media-title">
-              {meta.name || meta.title || 'Playing media'}
-            </Heading>
-            <Text type="supporting" className="player-media-sub">
-              {meta.playbackTitle || meta.releaseInfo || ''}
-              <span className="player-badge">{sourceName}</span>
-            </Text>
-          </div>
-          <div className="player-top-spacer" />
-          <button type="button" className="player-icon-btn" title="Choose stream" aria-label="Choose stream" onClick={() => onSwitchSource?.()}>
+      <header className="ls-top">
+        <button type="button" className="ls-icon" aria-label="Back" onClick={onBack}>
+          <ArrowLeft size={19} />
+        </button>
+        <div className="ls-title-block">
+          <Heading level={3} className="ls-title">
+            {meta.name || meta.title || 'Playing media'}
+          </Heading>
+          <p className="ls-subtitle-line">
+            {meta.playbackTitle || meta.releaseInfo || ''}
+            <span className="ls-source-tag">{sourceName}</span>
+          </p>
+        </div>
+        <div className="ls-top-actions">
+          <button type="button" className="ls-icon" title="Choose stream" aria-label="Choose stream" onClick={() => onSwitchSource?.()}>
             <Layers size={18} />
           </button>
-          <button type="button" className="player-icon-btn" title="Fullscreen (F)" aria-label="Fullscreen" onClick={toggleFullscreen}>
+          <button type="button" className="ls-icon" title="Fullscreen (F)" aria-label="Fullscreen" onClick={toggleFullscreen}>
             {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
           </button>
         </div>
       </header>
 
       {activePanel && (
-        <section className="player-tracks-sheet" aria-label="Playback settings">
-          <div className="sheet-head">
+        <aside className="ls-sheet" aria-label="Playback settings">
+          <div className="ls-sheet-head">
             <Heading level={4}>Playback</Heading>
-            <button type="button" className="player-icon-btn" aria-label="Close settings" onClick={() => setActivePanel(null)}>
+            <button type="button" className="ls-icon quiet" aria-label="Close settings" onClick={() => setActivePanel(null)}>
               <X size={16} />
             </button>
           </div>
 
-          <div className="sheet-tabs" role="tablist">
-            {panelButton('tracks', 'Audio & subtitles', Languages)}
-            {panelButton('quality', 'Quality', Signal)}
-            {panelButton('speed', 'Speed', Gauge)}
+          <div className="ls-tabs" role="tablist">
+            {panelTab('tracks', 'Tracks', Languages)}
+            {panelTab('picture', 'Picture', RectangleHorizontal)}
+            {panelTab('speed', 'Speed', Gauge)}
           </div>
 
-          <div className="sheet-body">
+          <div className="ls-sheet-body">
             {activePanel === 'tracks' && (
               <>
-                <div className="sheet-group">
-                  <span className="sheet-group-title">Audio</span>
+                <section className="ls-group">
+                  <h5 className="ls-group-label">Audio</h5>
                   {audioTracks.length === 0 && (
-                    <p className="sheet-note">
-                      {subsLoading ? 'Reading tracks…' : 'This file exposes one audio track. Browsers cannot switch audio inside MP4 or MKV files.'}
+                    <p className="ls-note">
+                      Single audio track. Browsers cannot switch audio inside MP4 or MKV files.
                     </p>
                   )}
                   {audioTracks.map(track => (
                     <button
                       key={track.index}
                       type="button"
-                      className={`sheet-row ${activeAudio === track.index ? 'active' : ''}`}
+                      className={`ls-row ${activeAudio === track.index ? 'is-active' : ''}`}
                       onClick={() => setActiveAudio(track.index)}
                     >
-                      <span className="sheet-row-text">
-                        <span className="sheet-row-title">{track.language}</span>
-                        <span className="sheet-row-sub">{track.label}</span>
+                      <span className="ls-row-main">
+                        <span className="ls-row-title">{track.language}</span>
+                        <span className="ls-row-sub">{track.label}</span>
                       </span>
-                      {activeAudio === track.index && <Check size={16} className="sheet-check" />}
+                      {activeAudio === track.index && <Check size={15} className="ls-check" />}
                     </button>
                   ))}
-                </div>
+                </section>
 
-                <div className="sheet-group">
-                  <span className="sheet-group-title">Subtitles</span>
+                <section className="ls-group">
+                  <h5 className="ls-group-label">Subtitles</h5>
                   <button
                     type="button"
-                    className={`sheet-row ${activeSubId === 'off' ? 'active' : ''}`}
+                    className={`ls-row ${activeSubId === 'off' ? 'is-active' : ''}`}
                     onClick={() => setActiveSubId('off')}
                   >
-                    <span className="sheet-row-text">
-                      <span className="sheet-row-title">Off</span>
-                    </span>
-                    {activeSubId === 'off' && <Check size={16} className="sheet-check" />}
+                    <span className="ls-row-main"><span className="ls-row-title">Off</span></span>
+                    {activeSubId === 'off' && <Check size={15} className="ls-check" />}
                   </button>
                   {subtitleTracks.map(track => {
                     const key = track.kind === 'addon' ? track.id : `builtin:${track.index}`;
@@ -687,296 +774,290 @@ export function Player({
                       <button
                         key={key}
                         type="button"
-                        className={`sheet-row ${activeSubId === key ? 'active' : ''}`}
+                        className={`ls-row ${activeSubId === key ? 'is-active' : ''}`}
                         onClick={() => setActiveSubId(key)}
                       >
-                        <span className="sheet-row-text">
-                          <span className="sheet-row-title">{track.language}</span>
-                          <span className="sheet-row-sub">{track.kind === 'addon' ? track.addon : 'Embedded in stream'}</span>
+                        <span className="ls-row-main">
+                          <span className="ls-row-title">{track.language}</span>
+                          <span className="ls-row-sub">{track.kind === 'addon' ? track.addon : 'Embedded'}</span>
                         </span>
-                        {activeSubId === key && <Check size={16} className="sheet-check" />}
+                        {activeSubId === key && <Check size={15} className="ls-check" />}
                       </button>
                     );
                   })}
-                  {subsLoading && <p className="sheet-note">Searching subtitle addons…</p>}
-                  {!subsLoading && subsNotice && <p className="sheet-note">{subsNotice}</p>}
+                  {subsLoading && <p className="ls-note">Searching subtitle addons…</p>}
+                  {!subsLoading && subsNotice && <p className="ls-note">{subsNotice}</p>}
 
-                  <div className="sheet-inline">
-                    <span className="sheet-inline-label">Size</span>
-                    <div className="sheet-segmented" role="group" aria-label="Subtitle size">
-                      {Object.keys(CUE_SIZES).map(size => (
+                  <div className="ls-field">
+                    <span className="ls-field-label">Size</span>
+                    <div className="ls-segmented" role="group" aria-label="Subtitle size">
+                      {Object.keys(SUB_SCALES).map(size => (
                         <button
                           key={size}
                           type="button"
-                          className={`segmented-option ${cueSize === size ? 'active' : ''}`}
-                          aria-pressed={cueSize === size}
-                          onClick={() => setCueSize(size)}
+                          className={subScale === size ? 'is-active' : ''}
+                          aria-pressed={subScale === size}
+                          onClick={() => setSubScale(size)}
                         >
                           {size}
                         </button>
                       ))}
                     </div>
                   </div>
-                </div>
+                  <div className="ls-field">
+                    <span className="ls-field-label">Height</span>
+                    <div className="ls-segmented" role="group" aria-label="Subtitle height">
+                      {Object.keys(SUB_OFFSETS).map(position => (
+                        <button
+                          key={position}
+                          type="button"
+                          className={subOffset === position ? 'is-active' : ''}
+                          aria-pressed={subOffset === position}
+                          onClick={() => setSubOffset(position)}
+                        >
+                          {position}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </section>
               </>
             )}
 
-            {activePanel === 'quality' && (
-              <div className="sheet-group">
-                <span className="sheet-group-title">Quality</span>
-                {!levels.length && (
-                  <p className="sheet-note">
-                    This source is delivered as a single file, so quality is fixed by the stream you picked.
-                  </p>
-                )}
-                {levels.length > 0 && (
-                  <>
+            {activePanel === 'picture' && (
+              <>
+                <section className="ls-group">
+                  <h5 className="ls-group-label">Aspect</h5>
+                  {Object.entries(FITS).map(([key, value]) => (
                     <button
+                      key={key}
                       type="button"
-                      className={`sheet-row ${activeLevel === -1 ? 'active' : ''}`}
-                      onClick={() => chooseLevel(-1)}
+                      className={`ls-row ${fit === key ? 'is-active' : ''}`}
+                      onClick={() => setFit(key)}
                     >
-                      <span className="sheet-row-text">
-                        <span className="sheet-row-title">Auto</span>
-                        <span className="sheet-row-sub">Follows bandwidth</span>
+                      <span className="ls-row-main">
+                        <span className="ls-row-title">{value.label}</span>
+                        <span className="ls-row-sub">{value.hint}</span>
                       </span>
-                      {activeLevel === -1 && <Check size={16} className="sheet-check" />}
+                      {fit === key && <Check size={15} className="ls-check" />}
                     </button>
-                    {[...levels].reverse().map(level => (
+                  ))}
+                  <div className="ls-field">
+                    <span className="ls-field-label">Zoom</span>
+                    <div className="ls-segmented" role="group" aria-label="Picture zoom">
+                      {ZOOMS.map(value => (
+                        <button
+                          key={value}
+                          type="button"
+                          className={zoom === value ? 'is-active' : ''}
+                          aria-pressed={zoom === value}
+                          onClick={() => setZoom(value)}
+                        >
+                          {Math.round(value * 100)}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="ls-group">
+                  <h5 className="ls-group-label">Quality</h5>
+                  {!levels.length && (
+                    <p className="ls-note">Single file. Quality comes from the stream you picked.</p>
+                  )}
+                  {levels.length > 0 && (
+                    <>
                       <button
-                        key={level.index}
                         type="button"
-                        className={`sheet-row ${activeLevel === level.index ? 'active' : ''}`}
-                        onClick={() => chooseLevel(level.index)}
+                        className={`ls-row ${activeLevel === -1 ? 'is-active' : ''}`}
+                        onClick={() => chooseLevel(-1)}
                       >
-                        <span className="sheet-row-text">
-                          <span className="sheet-row-title">
-                            {level.height ? `${level.height}p` : `${Math.round(level.bitrate / 1000)} kbps`}
-                          </span>
-                          <span className="sheet-row-sub">{Math.round(level.bitrate / 1000)} kbps</span>
+                        <span className="ls-row-main">
+                          <span className="ls-row-title">Auto</span>
+                          <span className="ls-row-sub">Follows bandwidth</span>
                         </span>
-                        {activeLevel === level.index && <Check size={16} className="sheet-check" />}
+                        {activeLevel === -1 && <Check size={15} className="ls-check" />}
                       </button>
-                    ))}
-                  </>
-                )}
-              </div>
+                      {[...levels].reverse().map(level => (
+                        <button
+                          key={level.index}
+                          type="button"
+                          className={`ls-row ${activeLevel === level.index ? 'is-active' : ''}`}
+                          onClick={() => chooseLevel(level.index)}
+                        >
+                          <span className="ls-row-main">
+                            <span className="ls-row-title">
+                              {level.height ? `${level.height}p` : `${Math.round(level.bitrate / 1000)} kbps`}
+                            </span>
+                            <span className="ls-row-sub">{Math.round(level.bitrate / 1000)} kbps</span>
+                          </span>
+                          {activeLevel === level.index && <Check size={15} className="ls-check" />}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </section>
+              </>
             )}
 
             {activePanel === 'speed' && (
-              <div className="sheet-group">
-                <span className="sheet-group-title">Speed</span>
+              <section className="ls-group">
+                <h5 className="ls-group-label">Speed</h5>
                 {SPEEDS.map(speed => (
                   <button
                     key={speed}
                     type="button"
-                    className={`sheet-row ${playbackSpeed === speed ? 'active' : ''}`}
+                    className={`ls-row ${playbackSpeed === speed ? 'is-active' : ''}`}
                     onClick={() => changeSpeed(speed)}
                   >
-                    <span className="sheet-row-text">
-                      <span className="sheet-row-title">{speed}×</span>
-                      {speed === 1 && <span className="sheet-row-sub">Normal</span>}
+                    <span className="ls-row-main">
+                      <span className="ls-row-title">{speed}×</span>
+                      {speed === 1 && <span className="ls-row-sub">Normal</span>}
                     </span>
-                    {playbackSpeed === speed && <Check size={16} className="sheet-check" />}
+                    {playbackSpeed === speed && <Check size={15} className="ls-check" />}
                   </button>
                 ))}
-              </div>
+              </section>
             )}
           </div>
-        </section>
+        </aside>
       )}
 
-      {playerStyle === 'compact' ? (
-        <div className="player-mpv-dock">
-          <div className="player-mpv-pill">
-            <div className="mpv-timeline-container">
-              <div className="mpv-buffered-track" style={{ width: `${duration ? (buffered / duration) * 100 : 0}%` }} />
-              <input
-                type="range"
-                className="mpv-progress-bar"
-                min={0}
-                max={duration || 100}
-                step={0.1}
-                value={currentTime}
-                onChange={(e) => seek(Number(e.target.value))}
-                aria-label="Seek timeline"
-              />
-            </div>
-
-            <div className="mpv-controls-row">
-              <button type="button" className="mpv-btn" title="Rewind 10s (←)" aria-label="Rewind 10 seconds" onClick={() => skip(-10)}>
-                <RotateCcw size={18} />
-              </button>
-              <button
-                type="button"
-                className="mpv-btn primary-play"
-                title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
-                aria-label={isPlaying ? 'Pause' : 'Play'}
-                onClick={togglePlay}
-              >
-                {isPlaying ? <Pause size={20} /> : <Play size={20} />}
-              </button>
-              <button type="button" className="mpv-btn" title="Forward 10s (→)" aria-label="Forward 10 seconds" onClick={() => skip(10)}>
-                <RotateCw size={18} />
-              </button>
-
-              <span className="mpv-timecode">
-                {formatTime(currentTime)} / {formatTime(duration)}
-              </span>
-
-              <div className="mpv-spacer" />
-
-              <div className="mpv-volume-group">
-                <button
-                  type="button"
-                  className="mpv-btn"
-                  title="Mute (M)"
-                  aria-label="Mute"
-                  onClick={() => {
-                    const video = videoRef.current;
-                    if (video) {
-                      video.muted = !video.muted;
-                      setIsMuted(video.muted);
-                    }
-                  }}
-                >
-                  {isMuted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
-                </button>
-                <input
-                  type="range"
-                  className="mpv-volume-slider"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={isMuted ? 0 : volume}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    setVolume(v);
-                    if (videoRef.current) {
-                      videoRef.current.volume = v;
-                      videoRef.current.muted = false;
-                      setIsMuted(false);
-                    }
-                  }}
-                  aria-label="Volume"
-                />
-              </div>
-
-              <button
-                type="button"
-                className={`mpv-btn ${audioCount > 1 ? 'has-badge' : ''}`}
-                title="Audio tracks"
-                aria-label="Audio tracks"
-                onClick={() => openPanel('tracks')}
-              >
-                <Languages size={18} />
-                {audioCount > 1 && <span className="mpv-count">{audioCount}</span>}
-              </button>
-
-              <button
-                type="button"
-                className={`mpv-btn ${activeSub ? 'highlight' : ''}`}
-                title="Subtitles (C)"
-                aria-label="Subtitles"
-                onClick={() => openPanel('tracks')}
-              >
-                <Subtitles size={18} />
-              </button>
-
-              <button type="button" className="mpv-btn speed-btn" title="Playback speed" aria-label="Playback speed" onClick={() => openPanel('speed')}>
-                <span>{playbackSpeed}×</span>
-              </button>
-
-              <button type="button" className="mpv-btn" title="Picture in picture" aria-label="Picture in picture" onClick={togglePiP}>
-                <PictureInPicture size={18} />
-              </button>
-
-              <button type="button" className="mpv-btn" title="Fullscreen (F)" aria-label="Fullscreen" onClick={toggleFullscreen}>
-                {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
-              </button>
-            </div>
+      <div className="ls-chrome" ref={chromeRef}>
+        <div
+          className="ls-timeline"
+          onPointerMove={(e) => { if (duration) setScrub(timelinePointer(e)); }}
+          onPointerLeave={() => setScrub(null)}
+        >
+          <div className="ls-timeline-track">
+            <div className="ls-timeline-buffered" style={{ width: `${bufferedPct}%` }} />
+            <div className="ls-timeline-played" style={{ width: `${played}%` }} />
+            <div className="ls-timeline-head" style={{ left: `${played}%` }} />
+            {scrub && <div className="ls-timeline-scrub" style={{ left: `${scrub.ratio * 100}%` }} />}
           </div>
+          {scrub && (
+            <span className="ls-scrub-bubble" style={{ left: `${scrub.ratio * 100}%` }}>
+              {formatTime(scrub.time)}
+            </span>
+          )}
+          <input
+            type="range"
+            className="ls-timeline-input"
+            min={0}
+            max={duration || 100}
+            step={0.1}
+            value={currentTime}
+            onChange={(e) => seek(Number(e.target.value))}
+            aria-label="Seek"
+          />
         </div>
-      ) : (
-        <div className="player-bottom-overlay">
-          <div className="edge-timeline-container">
-            <div className="mpv-buffered-track" style={{ width: `${duration ? (buffered / duration) * 100 : 0}%` }} />
+
+        <div className="ls-transport">
+          <button
+            type="button"
+            className="ls-play"
+            aria-label={isPlaying ? 'Pause' : 'Play'}
+            title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+            onClick={togglePlay}
+          >
+            {isPlaying ? <Pause size={20} /> : <Play size={20} />}
+          </button>
+          <button type="button" className="ls-icon" title="Rewind 10s (←)" aria-label="Rewind 10 seconds" onClick={() => skip(-10)}>
+            <RotateCcw size={17} />
+          </button>
+          <button type="button" className="ls-icon" title="Forward 10s (→)" aria-label="Forward 10 seconds" onClick={() => skip(10)}>
+            <RotateCw size={17} />
+          </button>
+
+          <span className="ls-clock">
+            <span className="ls-clock-now">{formatTime(currentTime)}</span>
+            <span className="ls-clock-sep">/</span>
+            <span className="ls-clock-total">{formatTime(duration)}</span>
+          </span>
+
+          <div className="ls-spacer" />
+
+          <div className="ls-volume">
+            <button
+              type="button"
+              className="ls-icon"
+              title="Mute (M)"
+              aria-label="Mute"
+              onClick={() => {
+                const video = videoRef.current;
+                if (video) {
+                  video.muted = !video.muted;
+                  setIsMuted(video.muted);
+                }
+              }}
+            >
+              {isMuted || volume === 0 ? <VolumeX size={17} /> : <Volume2 size={17} />}
+            </button>
             <input
               type="range"
-              className="mpv-progress-bar"
+              className="ls-volume-input"
               min={0}
-              max={duration || 100}
-              step={0.1}
-              value={currentTime}
-              onChange={(e) => seek(Number(e.target.value))}
-              aria-label="Seek timeline"
+              max={1}
+              step={0.05}
+              value={isMuted ? 0 : volume}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                setVolume(v);
+                if (videoRef.current) {
+                  videoRef.current.volume = v;
+                  videoRef.current.muted = false;
+                  setIsMuted(false);
+                }
+              }}
+              aria-label="Volume"
             />
           </div>
 
-          <HStack vAlign="center" className="edge-controls-row">
-            <button type="button" className="player-icon-btn primary" aria-label={isPlaying ? 'Pause' : 'Play'} onClick={togglePlay}>
-              {isPlaying ? <Pause size={22} /> : <Play size={22} />}
-            </button>
-            <button type="button" className="player-icon-btn" aria-label="Rewind 10 seconds" onClick={() => skip(-10)}>
-              <RotateCcw size={19} />
-            </button>
-            <button type="button" className="player-icon-btn" aria-label="Forward 10 seconds" onClick={() => skip(10)}>
-              <RotateCw size={19} />
-            </button>
-
-            <span className="mpv-timecode">
-              {formatTime(currentTime)} / {formatTime(duration)}
-            </span>
-
-            <div className="mpv-spacer" />
-
-            <div className="mpv-volume-group">
-              <button
-                type="button"
-                className="player-icon-btn"
-                aria-label="Mute"
-                onClick={() => {
-                  const video = videoRef.current;
-                  if (video) {
-                    video.muted = !video.muted;
-                    setIsMuted(video.muted);
-                  }
-                }}
-              >
-                {isMuted || volume === 0 ? <VolumeX size={19} /> : <Volume2 size={19} />}
-              </button>
-              <input
-                type="range"
-                className="mpv-volume-slider"
-                min={0}
-                max={1}
-                step={0.05}
-                value={isMuted ? 0 : volume}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  setVolume(v);
-                  if (videoRef.current) {
-                    videoRef.current.volume = v;
-                    videoRef.current.muted = false;
-                    setIsMuted(false);
-                  }
-                }}
-                aria-label="Volume"
-              />
-            </div>
-
-            <button type="button" className="player-icon-btn" title="Audio tracks" aria-label="Audio tracks" onClick={() => openPanel('tracks')}>
-              <Languages size={19} />
-            </button>
-            <button type="button" className="player-icon-btn" title="Subtitles" aria-label="Subtitles" onClick={() => openPanel('tracks')}>
-              <Subtitles size={19} />
-            </button>
-            <button type="button" className="player-icon-btn" title="Fullscreen" aria-label="Fullscreen" onClick={toggleFullscreen}>
-              {isFullscreen ? <Minimize size={19} /> : <Maximize size={19} />}
-            </button>
-          </HStack>
+          <button
+            type="button"
+            className={`ls-icon ${audioTracks.length > 1 ? 'has-count' : ''}`}
+            title="Audio tracks"
+            aria-label="Audio tracks"
+            onClick={() => openPanel('tracks')}
+          >
+            <Languages size={17} />
+            {audioTracks.length > 1 && <span className="ls-count">{audioTracks.length}</span>}
+          </button>
+          <button
+            type="button"
+            className={`ls-icon ${activeSub ? 'is-on' : ''}`}
+            title="Subtitles (C)"
+            aria-label="Subtitles"
+            onClick={() => openPanel('tracks')}
+          >
+            <Subtitles size={17} />
+          </button>
+          <button
+            type="button"
+            className="ls-icon"
+            title={`Aspect: ${FITS[fit].label} (A)`}
+            aria-label={`Aspect ratio: ${FITS[fit].label}`}
+            onClick={() => openPanel('picture')}
+          >
+            <RectangleHorizontal size={17} />
+          </button>
+          <button
+            type="button"
+            className="ls-icon ls-speed"
+            title="Playback speed"
+            aria-label="Playback speed"
+            onClick={() => openPanel('speed')}
+          >
+            {playbackSpeed}×
+          </button>
+          <button type="button" className="ls-icon" title="Picture in picture" aria-label="Picture in picture" onClick={togglePiP}>
+            <PictureInPicture size={17} />
+          </button>
+          <button type="button" className="ls-icon" title="Fullscreen (F)" aria-label="Fullscreen" onClick={toggleFullscreen}>
+            {isFullscreen ? <Minimize size={17} /> : <Maximize size={17} />}
+          </button>
         </div>
-      )}
+      </div>
     </div>
   );
 }

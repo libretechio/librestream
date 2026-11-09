@@ -1,5 +1,34 @@
 # LibreStream validation
 
+## Player chrome, subtitle placement and aspect modes (2026-11-09, local only)
+
+Reported: cues ran off the bottom of the screen, fullscreen did nothing, no aspect/zoom control, and the player chrome still read as generated rather than designed.
+
+Causes:
+- Browser-rendered cues anchor to the video element box, not the picture. The element spans the whole viewport, so cues sat at the screen bottom, under the control bar, even when the picture was letterboxed.
+- The fullscreen button toggled `document.fullscreenElement` only; iOS Safari needs `video.webkitEnterFullscreen`, and the previous state never re-synced on `fullscreenchange`.
+- There was no picture control at all: `object-fit` was fixed to `contain`.
+
+Changes:
+- `web/picture.js` computes the visible picture rect from stage size, intrinsic size, fit mode and zoom. Six unit tests cover letterbox, pillarbox, crop, stretch, zoom and missing metadata.
+- `web/SubtitleLayer.jsx` paints the active cue itself over that rect, so cues are bounded by the picture and lifted above the control bar while it is visible. Subtitle files are sanitised to inline emphasis only; `TextTrack.mode` stays `hidden` so the browser never draws a second copy.
+- Subtitle size and height are user controls (small/medium/large, low/standard/high), persisted per browser.
+- Aspect control in the Picture tab: Fit, Fill, Stretch plus zoom 100/110/125/150%, with keyboard `A` cycling fit.
+- Fullscreen: `requestFullscreen` on the player, `webkitEnterFullscreen` fallback for iOS, state synced from `fullscreenchange` and `webkitfullscreenchange`.
+- Chrome rebuilt as a matte instrument panel: one accent, hairline rules, no glow or gradients beyond the scrims, single 44px transport row, hover-only scrub bubble, sheet with three tabs (Tracks, Picture, Speed) instead of a stacked drawer.
+
+Measured in the browser against a local 640x360 fixture with a real SRT through the subtitle gateway:
+- Phone 375x844, Fit: picture occupies y 312-532; cue occupied y 374-427, inside the picture and 335px above the control bar.
+- Phone, Fill: cue bottom 744 with the bar at 762, an 18px gap, never under the bar.
+- Desktop 1425x900, Fit: picture y 49-851, cue bottom 751, bar top 818.
+- Subtitle height control moves the cue from 800 to 720; size control from 34px to 41.5px.
+- Phone transport: one 44px row, six controls, no horizontal overflow. Sheet rows 44px, tabs 40px, close 40px; sheet 359x426, fits without scrolling.
+
+Not verified:
+- Fullscreen engagement. The automation browser rejects `requestFullscreen` (the call never resolves), so the button path is implemented but unproven here; it needs one press on a real device.
+- Audio track switching on a multi-audio HLS source, and embedded HLS subtitle tracks. No such source was available.
+- Production. Nothing pushed or deployed for this change.
+
 ## Player tracks and prewarmed ranking (2026-11-09, local only)
 
 Reported defects: no audio track switching, no subtitles from embedded tracks or the OpenSubtitles addon, a dead play button beside each episode, and Play starting the connection ranking every time.
