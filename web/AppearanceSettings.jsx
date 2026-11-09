@@ -1,282 +1,187 @@
-import React from 'react';
-import { Dialog, DialogHeader } from '@astryxdesign/core/Dialog';
-import { Button } from '@astryxdesign/core/Button';
-import { Badge } from '@astryxdesign/core/Badge';
-import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl';
-import { VStack } from '@astryxdesign/core/VStack';
-import { HStack } from '@astryxdesign/core/HStack';
-import { Text } from '@astryxdesign/core/Text';
-import { Heading } from '@astryxdesign/core/Heading';
-import { Icon } from '@astryxdesign/core/Icon';
-import { Check, RotateCcw, Type, Layout as LayoutIcon, PlaySquare, Sparkles } from 'lucide-react';
-import { NuvioPaletteIcon } from './Icons.jsx';
-import {
-  PALETTES,
-  FONT_PRESETS,
-  HOMEPAGE_LAYOUTS,
-  POSTER_SHAPES,
-  PLAYER_STYLES,
-  DEFAULT_PREFERENCES,
-  applyPaletteToDOM
-} from './palettes.js';
+import React, { useState } from 'react';
+import { Check, RotateCcw } from 'lucide-react';
+import { Button, Modal, ModalHeader, Segmented } from './ui.jsx';
+import { PALETTES, FONT_PRESETS } from './palettes.js';
+
+const POSTER_SHAPES = [
+  { id: 'poster', name: 'Portrait posters' },
+  { id: 'landscape', name: 'Widescreen cards' }
+];
+
+const HOMEPAGE_LAYOUTS = [
+  { id: 'premiere', name: 'Cinematic', badge: 'Default', description: 'Full-bleed hero with pager, then poster rails.' },
+  { id: 'collection', name: 'Collection', badge: 'Dense', description: 'Compact hero, filter row, tighter shelves.' },
+  { id: 'focus', name: 'Focus', badge: 'Minimal', description: 'Restrained banner, watch-first hierarchy.' }
+];
+
+const PLAYER_STYLES = [
+  { id: 'compact', name: 'Floating deck', badge: 'Default', description: 'One glass card: timeline and transport.' },
+  { id: 'edge', name: 'Edge deck', badge: 'Wide', description: 'Deck pinned to the bottom edge.' },
+  { id: 'panel', name: 'Panel', badge: 'Compact', description: 'Minimal deck with a side panel for tracks.' }
+];
 
 export function AppearanceContent({ currentPreferences, onApply }) {
-  const prefs = { ...DEFAULT_PREFERENCES, ...currentPreferences };
-  const selectedPalette = PALETTES.find((p) => p.id === prefs.palette) || PALETTES[0];
+  const [prefs, setPrefs] = useState(currentPreferences);
+  const activePalette = PALETTES.find((palette) => palette.id === prefs.palette) || PALETTES[0];
+  const activeFont = FONT_PRESETS.find((font) => font.id === prefs.font) || FONT_PRESETS[0];
 
   const update = (patch) => {
     const next = { ...prefs, ...patch };
-    applyPaletteToDOM(next);
+    setPrefs(next);
     onApply(next);
   };
 
-  const handleSelectPalette = (pal) => {
-    update({
-      palette: pal.id,
-      accent: pal.accent
-    });
-  };
-
-  const handleReset = () => {
-    applyPaletteToDOM(DEFAULT_PREFERENCES);
-    onApply(DEFAULT_PREFERENCES);
-  };
-
   return (
-    <VStack gap={5} className="appearance-content">
-      {/* Live Active Theme Preview Banner */}
-      <div className="theme-live-banner">
-        <div className="theme-live-info">
-          <span className="theme-live-eyebrow">Active Theme · Changes apply instantly</span>
-          <strong className="theme-live-title">
-            {selectedPalette.name} · {FONT_PRESETS.find((f) => f.id === prefs.font)?.name || 'Nuvio Sans'}
-          </strong>
-          <span className="theme-live-sub">{selectedPalette.description}</span>
+    <div className="ls-appearance">
+      <div className="ls-theme-live">
+        <div>
+          <b>{activePalette.name} · {activeFont.name}</b>
+          <span>{activePalette.description}</span>
         </div>
-        <div className="theme-live-swatches">
-          {selectedPalette.swatches.map((c, i) => (
-            <span key={i} className="theme-live-dot" style={{ backgroundColor: c }} />
+        <div className="ls-swatches">
+          {activePalette.swatches.map((color) => (
+            <i key={color} style={{ background: color }} />
           ))}
         </div>
       </div>
 
-      {/* Colour Palette Picker */}
-      <VStack gap={2}>
-        <HStack gap={2} vAlign="center" hAlign="between">
-          <HStack gap={2} vAlign="center">
-            <NuvioPaletteIcon size={18} />
-            <Heading level={4}>Theme & Colour Palette</Heading>
-          </HStack>
-          <Badge variant="neutral" label={`${PALETTES.length} themes`} />
-        </HStack>
-        <div className="palette-picker-grid">
-          {PALETTES.map((pal) => {
-            const isSelected = prefs.palette === pal.id;
+      <section>
+        <h2 className="ls-section-title">Palette</h2>
+        <div className="ls-option-grid">
+          {PALETTES.map((palette) => {
+            const isActive = prefs.palette === palette.id;
             return (
               <button
+                key={palette.id}
                 type="button"
-                key={pal.id}
-                className={`choice-card palette-card ${isSelected ? 'active' : ''}`}
-                onClick={() => handleSelectPalette(pal)}
-                aria-pressed={isSelected}
+                className={`ls-option ${isActive ? 'is-active' : ''}`}
+                aria-pressed={isActive}
+                onClick={() => update({ palette: palette.id, accent: palette.accent })}
               >
-                <div className="choice-card-top">
-                  <span className="card-category-pill">{pal.category}</span>
-                  {isSelected && <Check size={16} className="check-icon" />}
-                </div>
-                <span className="choice-title">{pal.name}</span>
-                <div className="swatch-strip">
-                  {pal.swatches.map((color, idx) => (
-                    <span
-                      key={idx}
-                      className="swatch-block"
-                      style={{ backgroundColor: color }}
-                    />
+                <span className="ls-option-badge">{palette.category}</span>
+                <span className="ls-option-title">{palette.name}</span>
+                <span className="ls-swatches">
+                  {palette.swatches.map((color) => (
+                    <i key={color} style={{ background: color }} />
                   ))}
-                </div>
-                <span className="choice-desc">{pal.description}</span>
+                </span>
+                <span className="ls-option-desc">{palette.description}</span>
               </button>
             );
           })}
         </div>
-      </VStack>
+      </section>
 
-      {/* Accent Colour Swatches */}
-      {selectedPalette.accents && (
-        <VStack gap={2}>
-          <Heading level={4}>Accent Highlight</Heading>
-          <HStack gap={3} vAlign="center" wrap="wrap">
-            {selectedPalette.accents.map((acc) => {
-              const isSelected = prefs.accent?.toLowerCase() === acc.color.toLowerCase();
-              return (
-                <button
-                  type="button"
-                  key={acc.id}
-                  className={`accent-pill-btn ${isSelected ? 'active' : ''}`}
-                  onClick={() => update({ accent: acc.color })}
-                  aria-pressed={isSelected}
-                >
-                  <span className="accent-swatch-dot" style={{ backgroundColor: acc.color }} />
-                  <span>{acc.name}</span>
-                  {isSelected && <Check size={14} />}
-                </button>
-              );
-            })}
-          </HStack>
-        </VStack>
-      )}
-
-      {/* Typography Pairing */}
-      <VStack gap={2}>
-        <HStack gap={2} vAlign="center">
-          <Icon icon={Type} size="sm" />
-          <Heading level={4}>Typography Pairing</Heading>
-        </HStack>
-        <div className="layout-picker-grid">
-          {FONT_PRESETS.map((fp) => {
-            const isSelected = prefs.font === fp.id;
+      <section>
+        <h2 className="ls-section-title">Typography</h2>
+        <div className="ls-option-grid">
+          {FONT_PRESETS.map((font) => {
+            const isActive = prefs.font === font.id;
             return (
               <button
+                key={font.id}
                 type="button"
-                key={fp.id}
-                className={`choice-card ${isSelected ? 'active' : ''}`}
-                onClick={() => update({ font: fp.id })}
-                aria-pressed={isSelected}
+                className={`ls-option ${isActive ? 'is-active' : ''}`}
+                aria-pressed={isActive}
+                onClick={() => update({ font: font.id })}
               >
-                <div className="choice-card-top">
-                  <span className="card-category-pill">{fp.badge}</span>
-                  {isSelected && <Check size={16} className="check-icon" />}
-                </div>
-                <span className="choice-title" style={{ fontFamily: fp.heading }}>
-                  {fp.name}
-                </span>
-                <span className="choice-desc" style={{ fontFamily: fp.body }}>
-                  {fp.description}
-                </span>
+                <span className="ls-option-badge">{font.badge}</span>
+                <span className="ls-option-title" style={{ fontFamily: font.heading }}>{font.name}</span>
+                <span className="ls-option-desc">{font.description}</span>
               </button>
             );
           })}
         </div>
-      </VStack>
+      </section>
 
-      {/* Catalog Poster Shape (Nuvio Portrait 2:3 vs Widescreen 16:9) */}
-      <VStack gap={2}>
-        <HStack gap={2} vAlign="center">
-          <Icon icon={Sparkles} size="sm" />
-          <Heading level={4}>Catalog Card Shape</Heading>
-        </HStack>
-        <SegmentedControl
-          label="Catalog card shape"
+      <section>
+        <h2 className="ls-section-title">Card shape</h2>
+        <Segmented
+          label="Card shape"
           value={prefs.posterShape || 'poster'}
-          onChange={(val) => update({ posterShape: val })}
-        >
-          {POSTER_SHAPES.map((ps) => (
-            <SegmentedControlItem key={ps.id} value={ps.id} label={ps.name} />
-          ))}
-        </SegmentedControl>
-      </VStack>
+          onChange={(value) => update({ posterShape: value })}
+          options={POSTER_SHAPES.map((shape) => ({ value: shape.id, label: shape.name }))}
+        />
+      </section>
 
-      {/* Homepage Layout Picker */}
-      <VStack gap={2}>
-        <HStack gap={2} vAlign="center">
-          <Icon icon={LayoutIcon} size="sm" />
-          <Heading level={4}>Homepage Layout</Heading>
-        </HStack>
-        <div className="layout-picker-grid">
-          {HOMEPAGE_LAYOUTS.map((l) => {
-            const isSelected = prefs.layout === l.id;
+      <section>
+        <h2 className="ls-section-title">Homepage</h2>
+        <div className="ls-option-grid">
+          {HOMEPAGE_LAYOUTS.map((layout) => {
+            const isActive = prefs.layout === layout.id;
             return (
               <button
+                key={layout.id}
                 type="button"
-                key={l.id}
-                className={`choice-card ${isSelected ? 'active' : ''}`}
-                onClick={() => update({ layout: l.id })}
-                aria-pressed={isSelected}
+                className={`ls-option ${isActive ? 'is-active' : ''}`}
+                aria-pressed={isActive}
+                onClick={() => update({ layout: layout.id })}
               >
-                <div className="choice-card-top">
-                  <span className="card-category-pill">{l.badge}</span>
-                  {isSelected && <Check size={16} className="check-icon" />}
-                </div>
-                <span className="choice-title">{l.name}</span>
-                <span className="choice-desc">{l.description}</span>
+                <span className="ls-option-badge">{layout.badge}</span>
+                <span className="ls-option-title">{layout.name}</span>
+                <span className="ls-option-desc">{layout.description}</span>
               </button>
             );
           })}
         </div>
-      </VStack>
+      </section>
 
-      {/* Player Controls Picker */}
-      <VStack gap={2}>
-        <HStack gap={2} vAlign="center">
-          <Icon icon={PlaySquare} size="sm" />
-          <Heading level={4}>Video Player Controls</Heading>
-        </HStack>
-        <div className="layout-picker-grid">
-          {PLAYER_STYLES.map((ps) => {
-            const isSelected = prefs.player === ps.id;
+      <section>
+        <h2 className="ls-section-title">Player</h2>
+        <div className="ls-option-grid">
+          {PLAYER_STYLES.map((style) => {
+            const isActive = prefs.player === style.id;
             return (
               <button
+                key={style.id}
                 type="button"
-                key={ps.id}
-                className={`choice-card ${isSelected ? 'active' : ''}`}
-                onClick={() => update({ player: ps.id })}
-                aria-pressed={isSelected}
+                className={`ls-option ${isActive ? 'is-active' : ''}`}
+                aria-pressed={isActive}
+                onClick={() => update({ player: style.id })}
               >
-                <div className="choice-card-top">
-                  <span className="card-category-pill">{ps.badge}</span>
-                  {isSelected && <Check size={16} className="check-icon" />}
-                </div>
-                <span className="choice-title">{ps.name}</span>
-                <span className="choice-desc">{ps.description}</span>
+                <span className="ls-option-badge">{style.badge}</span>
+                <span className="ls-option-title">{style.name}</span>
+                <span className="ls-option-desc">{style.description}</span>
               </button>
             );
           })}
         </div>
-      </VStack>
+      </section>
 
-      <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap" className="appearance-actions">
+      <div>
         <Button
           variant="secondary"
-          label="Reset defaults"
-          icon={<Icon icon={RotateCcw} />}
-          onClick={handleReset}
+          icon={<RotateCcw size={15} />}
+          label="Reset to defaults"
+          onClick={() => {
+            const next = {
+              ...prefs,
+              palette: PALETTES[0].id,
+              accent: PALETTES[0].accent,
+              font: 'graphite',
+              posterShape: 'poster',
+              layout: 'premiere',
+              player: 'compact'
+            };
+            setPrefs(next);
+            onApply(next);
+          }}
         />
-      </HStack>
-    </VStack>
+      </div>
+    </div>
   );
 }
 
-export function AppearanceSettings({
-  isOpen,
-  currentPreferences,
-  onApply,
-  onClose
-}) {
+export function AppearanceSettings({ isOpen, currentPreferences, onApply, onClose }) {
   return (
-    <Dialog
-      isOpen={isOpen}
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-      width="50rem"
-      maxHeight="90dvh"
-      padding={4}
-    >
-      <DialogHeader
-        title="Appearance & Themes"
-        onOpenChange={(open) => {
-          if (!open) onClose();
-        }}
-      />
-      <div className="dialog-scroll appearance-dialog-body">
-        <AppearanceContent
-          currentPreferences={currentPreferences}
-          onApply={onApply}
-        />
-        <div className="appearance-modal-footer">
+    <Modal open={isOpen} onClose={onClose} wide labelledBy="appearance-title">
+      <ModalHeader title="Appearance" id="appearance-title" onClose={onClose} />
+      <div className="ls-modal-body">
+        <AppearanceContent currentPreferences={currentPreferences} onApply={onApply} />
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button variant="primary" label="Done" onClick={onClose} />
         </div>
       </div>
-    </Dialog>
+    </Modal>
   );
 }

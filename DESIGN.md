@@ -1,36 +1,51 @@
 # LibreStream browser direction
 
-Phone and desktop browsers are the primary surfaces. Browse, search, open a title, select a source, watch. Existing Jellyfin clients cover TVs.
+Phone and desktop browsers are the primary surfaces. Browse, search, open a title,
+watch. Existing Jellyfin clients cover TVs.
 
 ## System
 
-Ant Design, shadcn/ui and DaisyUI are the reference bar: token-driven colour, dense rows, hairline borders, one accent, small radii, real focus rings. LibreStream takes that discipline and keeps its own identity — warm cinema palette, artwork-forward browse.
+Apple TV+ / Infuse frosted glass, taken as a material direction, not a feature list.
+No component library: `web/ui.jsx` holds the primitives.
 
-`web/tokens.css` is the only place sizes are decided. A palette swap in `palettes.css` restyles the whole app because every surface derives from `--color-*`.
-
-- **Space**: 4px grid (`--ls-1` … `--ls-12`).
-- **Radius**: four steps only — 4, 6, 8, 12px. No pills except status chips.
-- **Type**: 11, 12, 13, 14, 16, 20, 26, 34px. Tabular numerals for every rating, runtime and timecode.
-- **Surfaces**: body, surface, card, raised. Layering comes from luminance, never from blur or shadow.
-- **Borders**: 1px hairlines carry hierarchy. Drop shadows are not used for elevation.
-- **Accent**: primary action, active navigation, focus ring. Nothing else.
-- **Blur**: two sticky bars only — the header and the phone navigation. Everything else is solid.
-- **Motion**: colour and border transitions at 120–180ms. No hover translate, no scale.
+- **Surfaces**: Warm Graphite — `#0F0E0D` body, `#151311` surface, `#1D1A17` card.
+  Two alternates ship: Obsidian Noir and Blue Hour.
+- **Glass**: `rgba(255,255,255,0.05–0.14)` over `blur(28–40px) saturate(180–190%)`,
+  hairline borders at 9–14% white. Glass is the material of floating chrome only.
+- **Actions**: white is the action colour. Mint (`--ls-cached`) means cached.
+  Amber (`--ls-gold`) is IMDb only.
+- **Type**: Figtree for interface and titles, JetBrains Sans for numerals, badges and
+  timecodes. 11 / 12 / 13 / 14 / 16 / 20 / 28 / 40px.
+- **Radius**: 6 / 10 / 14 / 18px, pills only for chips and the player controls.
+- **Space**: 4px grid.
+- **Motion**: 140–300ms on colour, border, shadow and a 1.03 scale on cards. Nothing
+  bounces.
 
 ## Screens
 
-- **Header**: solid bar, hairline rule, wordmark left, segmented navigation centre, appearance and profile right. Navigation becomes a segmented control at 64rem; below that the phone bar takes over, so only one navigation is ever visible.
-- **Browse**: hero with one artwork and one scrim, then horizontal shelves. Shelves scroll sideways with desktop arrows; "See all" opens a grid dialog. Posters carry certification, rating and a `year · type` line — no invented metadata.
-- **Title dialog**: 16:9 artwork, one scrim, cast as text chips, episodes as hairline rows with a dedicated play button, sources as hairline rows inside a single bordered container.
-- **Search / Saved / Appearance / Settings**: page title, then content. No decorative panels.
-- **Player**: matte instrument panel — one 44px transport row, a hover scrub bubble, and a three-tab sheet (Tracks, Picture, Speed).
+- **Header**: floating glass dock, inset from the edges, plain text navigation, a
+  palette pill and the profile. On phones it reduces to brand + profile; navigation
+  moves to a floating glass dock at the bottom.
+- **Browse**: full-bleed hero (artwork, one scrim, facts, Play / Choose stream /
+  Watchlist), a filter strip, Continue watching as 16:9 cards, then poster shelves.
+- **Poster card**: ratings and certification inside the artwork; title, `year · type ·
+  runtime` and a data strip below. Hover scales 1.03 and reveals a white play button.
+- **Title page**: full takeover, not a modal box. Hero with pinned actions. Movies get
+  Play + Choose stream; series get an episode list where each row has its own Play,
+  and Choose stream lives on the episode page.
+- **Player**: one floating glass deck — timeline, play, ±10s, timecode, volume, tracks,
+  aspect, speed, PiP, fullscreen. Aspect opens a popover with Fit / Fill / Stretch and
+  zoom. Subtitles are drawn by the app inside the picture rect.
 
 ## Accessibility
 
-Body text meets WCAG AA on every shipped palette, light and dark: the lowest measured ratio is 5.14 (Catppuccin Latte) and 7.45 on Nuvio Gold. Tertiary ink is an opaque mix, never an alpha over an unknown surface, so contrast survives palette changes. Interactive targets are at least 40px on phones and 36px on desktop. Focus is a 2px accent ring with offset, never removed.
+Body text passes WCAG AA on every palette: lowest measured ratio 6.17 at 11px
+(card metadata), 7.71 for hero synopsis, 17.29 for titles. Nothing interactive is
+under 24px; phone targets are 32–44px. Focus is a 2px white ring, never removed.
 
 ## Behaviour
 
-Existing Jellyfin clients cover TVs. Use the official Nuvio desktop/mobile task flow as a reference, not their TV focus engine or native player implementation. Both official clients are Kotlin/Compose apps. This browser source is independent and uses the Stremio addon protocol.
-
-No Nuvio account flow. Authentik supplies a stable user identifier. Watchlists and progress are browser-local and scoped by that identifier. Shared addon configuration is read by the gateway from a private runtime file, never compiled into assets.
+Stremio addon protocol. Authentik supplies a stable user identifier. Watchlists,
+progress, appearance and remembered availability are browser-local per identity.
+Shared addon configuration is read by the gateway from a private runtime file and is
+never compiled into assets.

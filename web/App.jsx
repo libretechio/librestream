@@ -1,25 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from '@astryxdesign/core/Button';
-import { Badge } from '@astryxdesign/core/Badge';
-import { Skeleton } from '@astryxdesign/core/Skeleton';
-import { Icon } from '@astryxdesign/core/Icon';
 import {
   Bookmark,
   BookmarkCheck,
   Clapperboard,
-  RotateCw,
   ChevronLeft,
   ChevronRight,
-  Check
+  RotateCw,
+  Play,
+  Search as SearchIcon
 } from 'lucide-react';
-import { TextInput } from '@astryxdesign/core/TextInput';
-import { Selector } from '@astryxdesign/core/Selector';
-import { Dialog, DialogHeader } from '@astryxdesign/core/Dialog';
-import { AppShell } from '@astryxdesign/core/AppShell';
-import { VStack } from '@astryxdesign/core/VStack';
-import { HStack } from '@astryxdesign/core/HStack';
-import { Text } from '@astryxdesign/core/Text';
-import { Heading } from '@astryxdesign/core/Heading';
+import { Button, IconButton, Badge, Chip, Field, Select, Segmented, Modal, ModalHeader, Skeleton } from './ui.jsx';
 import { Sources } from './Sources.jsx';
 import { Brand } from './Brand.jsx';
 import { HeroBanner } from './HeroBanner.jsx';
@@ -32,10 +22,10 @@ import {
   NuvioPaletteIcon,
   NuvioSettingsIcon,
   NuvioPlayIcon,
-  NuvioEpisodesIcon,
   ImdbBadge
 } from './Icons.jsx';
 import { DEFAULT_PREFERENCES, PALETTES, applyPaletteToDOM } from './palettes.js';
+import { api, resource, supports, dedupe, safeURL, readState, writeState } from './api';
 import {
   posterMetaLine,
   certificationOf,
@@ -51,124 +41,82 @@ import {
   titlesNeedingAvailability,
   prefetchAvailability
 } from './badges.js';
-import {
-  api,
-  resource,
-  supports,
-  dedupe,
-  safeURL,
-  readState,
-  writeState
-} from './api';
 
-function Message({ children }) {
-  return (
-    <Text as="p" role="status" color="secondary">
-      {children}
-    </Text>
+function useMediaQuery(query) {
+  const [matches, setMatches] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(query).matches
   );
+  useEffect(() => {
+    const list = window.matchMedia(query);
+    const sync = () => setMatches(list.matches);
+    sync();
+    list.addEventListener('change', sync);
+    return () => list.removeEventListener('change', sync);
+  }, [query]);
+  return matches;
 }
 
-function PosterCard({
-  item,
-  onOpen,
-  shape = 'poster',
-  inGrid = false,
-  saved = false,
-  progress = 0,
-  availability = null,
-  onPlay
-}) {
-  const [broken, setBroken] = useState(false);
-  const imdb = item.imdbRating || item.rating;
-  const remembered = availability || {};
-  const rt = rottenTomatoesOf(item) || (remembered.rt ? { score: remembered.rt, certified: false } : null);
-  const certification = certificationOf(item) || remembered.cert || '';
-  const title = item.name || item.title || item.id;
-  const isLandscape = shape === 'landscape' && !inGrid;
-  const imgUrl = isLandscape
-    ? safeURL(item.background || item.banner || item.poster)
-    : safeURL(item.poster || item.background);
-  const logoUrl = isLandscape ? safeURL(item.logo) : '';
+/* ------------------------------ poster card ------------------------------ */
 
+function PosterCard({ item, onOpen, onPlay, saved = false, progress = 0, availability = null, inGrid = false }) {
+  const [broken, setBroken] = useState(false);
+  const remembered = availability || {};
+  const imdb = item.imdbRating || item.rating;
+  const rt = rottenTomatoesOf(item) || (remembered.rt ? { score: remembered.rt } : null);
+  const cert = certificationOf(item) || remembered.cert || '';
+  const title = item.name || item.title || item.id;
+  const poster = safeURL(item.poster || item.background);
   const metaLine = posterMetaLine(item);
-  const fresh = isNew(item);
   const pct = Math.round(Math.min(100, Math.max(0, progress)));
 
-  // Inside the poster: ratings and certification only.
-  // Everything else belongs to the strip underneath.
   const strip = [
-    ...availabilityBadges(availability),
-    availability?.size ? formatSize(availability.size) : '',
-    availability?.cached > 0 ? 'cached' : '',
-    fresh ? 'new' : '',
+    ...availabilityBadges(remembered),
+    remembered.size ? formatSize(remembered.size) : '',
+    remembered.cached > 0 ? 'cached' : '',
+    isNew(item) ? 'new' : '',
     saved ? 'saved' : ''
   ].filter(Boolean);
 
   return (
-    <div
-      className={`poster-card ${isLandscape ? 'poster-card-landscape' : 'poster-card-portrait'} ${
-        inGrid ? 'poster-card-grid' : 'poster-card-rail'
-      }`}
-      data-media-id={item.id}
-    >
-      <div className="poster-art-wrap">
+    <article className="ls-poster" data-media-id={item.id}>
+      <div className="ls-poster-art">
         <button
           type="button"
-          className="poster-hit"
+          className="ls-poster-hit"
           onClick={() => onOpen(item)}
           aria-label={`${title}${metaLine ? ', ' + metaLine : ''}`}
         >
-          <div className="poster-media-box">
-            {!broken && imgUrl ? (
-              <img
-                className="poster-image"
-                src={imgUrl}
-                alt=""
-                loading="lazy"
-                onError={() => setBroken(true)}
-              />
+          <div className="ls-poster-media">
+            {!broken && poster ? (
+              <img className="ls-poster-img" src={poster} alt="" loading="lazy" onError={() => setBroken(true)} />
             ) : (
-              <div className="poster-placeholder">
-                <Icon icon={Clapperboard} size="lg" color="secondary" />
+              <div className="ls-poster-empty">
+                <Clapperboard size={22} strokeWidth={1.5} />
               </div>
             )}
 
-            {certification && (
-              <span className="poster-cert" aria-label={`Rated ${certification}`}>
-                {certification}
-              </span>
-            )}
-
             {(imdb || rt) && (
-              <span className="poster-ratings">
+              <span className="ls-poster-ratings">
                 {imdb && (
-                  <span className="poster-rating is-imdb">
-                    <span className="poster-star">★</span>
-                    {Number(imdb) ? Number(imdb).toFixed(1) : imdb}
-                  </span>
+                  <Badge tone="gold">
+                    ★ {Number(imdb) ? Number(imdb).toFixed(1) : imdb}
+                  </Badge>
                 )}
                 {rt && (
-                  <span
-                    className={`poster-rating is-rt ${rt.score >= 60 ? 'is-fresh' : 'is-rotten'}`}
-                    aria-label={`Rotten Tomatoes ${rt.score} percent`}
-                  >
-                    <span className="poster-tomato" aria-hidden="true">
-                      {rt.score >= 60 ? '🍅' : '🤮'}
-                    </span>
-                    {rt.score}%
-                  </span>
+                  <Badge aria-label={`Rotten Tomatoes ${rt.score} percent`}>{rt.score}%</Badge>
                 )}
               </span>
             )}
 
-            {isLandscape && logoUrl && (
-              <img src={logoUrl} alt="" className="poster-landscape-logo" />
+            {cert && (
+              <span className="ls-poster-cert">
+                <Badge>{cert}</Badge>
+              </span>
             )}
 
             {pct > 0 && (
-              <div className="poster-progress" aria-hidden="true">
-                <div style={{ width: `${pct}%` }} />
+              <div className="ls-poster-progress" aria-hidden="true">
+                <i style={{ width: `${pct}%` }} />
               </div>
             )}
           </div>
@@ -177,30 +125,30 @@ function PosterCard({
         {onPlay && (
           <button
             type="button"
-            className="poster-quick-play"
+            className="ls-poster-play"
             aria-label={`Play ${title}`}
-            title="Play best source"
+            title="Play best stream"
             onClick={(event) => {
               event.stopPropagation();
               onPlay(item);
             }}
           >
-            <NuvioPlayIcon size={15} />
+            <Play size={15} fill="currentColor" strokeWidth={0} />
           </button>
         )}
       </div>
 
-      <button type="button" className="poster-caption" onClick={() => onOpen(item)}>
-        <span className="poster-title">{title}</span>
-        {metaLine && <span className="poster-sub">{metaLine}</span>}
+      <button type="button" className="ls-poster-caption" onClick={() => onOpen(item)}>
+        <span className="ls-poster-title">{title}</span>
+        {metaLine && <span className="ls-poster-meta">{metaLine}</span>}
         {strip.length > 0 && (
-          <span className="poster-strip">
+          <span className="ls-poster-strip">
             {strip.map((label) => (
               <i
                 key={label}
-                className={`poster-chip${
+                className={`ls-strip-item${
                   /^(4K|DV|HDR|Atmos|REMUX|\d+p)$/i.test(label) ? ' is-quality' : ''
-                }${label === 'cached' ? ' is-cache' : ''}`}
+                }${label === 'cached' ? ' is-cached' : ''}`}
               >
                 {label}
               </i>
@@ -208,9 +156,11 @@ function PosterCard({
           </span>
         )}
       </button>
-    </div>
+    </article>
   );
 }
+
+/* ------------------------------ rows & shelves ------------------------------ */
 
 function ScrollRow({ label, children }) {
   const ref = useRef(null);
@@ -241,27 +191,17 @@ function ScrollRow({ label, children }) {
   };
 
   return (
-    <div className="scroll-row">
-      <div className="poster-row" ref={ref} onScroll={measure} aria-label={label}>
+    <div className="ls-row">
+      <div className="ls-row-scroll" ref={ref} onScroll={measure} aria-label={label}>
         {children}
       </div>
       {edges.start && (
-        <button
-          type="button"
-          className="row-arrow is-start"
-          aria-label={`Scroll ${label} back`}
-          onClick={() => nudge(-1)}
-        >
+        <button type="button" className="ls-row-arrow is-start" aria-label={`Scroll ${label} back`} onClick={() => nudge(-1)}>
           <ChevronLeft size={16} />
         </button>
       )}
       {edges.end && (
-        <button
-          type="button"
-          className="row-arrow is-end"
-          aria-label={`Scroll ${label} forward`}
-          onClick={() => nudge(1)}
-        >
+        <button type="button" className="ls-row-arrow is-end" aria-label={`Scroll ${label} forward`} onClick={() => nudge(1)}>
           <ChevronRight size={16} />
         </button>
       )}
@@ -269,130 +209,76 @@ function ScrollRow({ label, children }) {
   );
 }
 
-function Shelf({
-  title,
-  subtitle,
-  items,
-  onOpen,
-  onViewAll,
-  shape = 'poster',
-  grid = false,
-  savedIds,
-  progressMap,
-  availabilityStore,
-  onPlay
-}) {
-  if (!items || !items.length) return null;
+function Shelf({ title, subtitle, items, onOpen, onPlay, onViewAll, grid = false, savedIds, progressMap, availabilityStore }) {
+  if (!items?.length) return null;
+  const cards = items.map((item) => (
+    <PosterCard
+      key={(item.type || 'media') + ':' + item.id}
+      item={item}
+      onOpen={onOpen}
+      onPlay={onPlay}
+      inGrid={grid}
+      saved={savedIds?.has((item.type || 'movie') + ':' + item.id)}
+      progress={
+        progressMap?.[(item.type || 'movie') + ':' + item.id]?.position
+          ? (progressMap[(item.type || 'movie') + ':' + item.id].position /
+              (progressMap[(item.type || 'movie') + ':' + item.id].duration || 1)) * 100
+          : 0
+      }
+      availability={availabilityStore?.[(item.type || 'movie') + ':' + item.id]}
+    />
+  ));
+
   return (
-    <section className="shelf">
-      <div className="shelf-header">
-        <div className="shelf-title-group">
-          <Heading level={2} className="shelf-heading">
-            {title}
-          </Heading>
-          {subtitle && <span className="shelf-subtitle">{subtitle}</span>}
-        </div>
+    <section className="ls-shelf">
+      <div className="ls-shelf-head">
+        <h2 className="ls-shelf-title">{title}</h2>
+        {subtitle && <span className="ls-shelf-sub">{subtitle}</span>}
         {!grid && onViewAll && (
-          <button
-            type="button"
-            className="nuvio-view-all-pill"
-            onClick={onViewAll}
-            aria-label={`See all in ${title}`}
-          >
-            <span>See all</span>
-            <ChevronRight size={15} />
+          <button type="button" className="ls-shelf-more" onClick={onViewAll} aria-label={`See all in ${title}`}>
+            See all <ChevronRight size={14} />
           </button>
         )}
       </div>
-
-      {grid ? (
-        <div className="poster-grid">
-          {items.map((item) => (
-            <PosterCard
-              key={(item.type || 'media') + ':' + item.id}
-              item={item}
-              onOpen={onOpen}
-              shape="poster"
-              inGrid
-              saved={savedIds?.has((item.type || 'movie') + ':' + item.id)}
-              progress={progressMap?.[(item.type || 'movie') + ':' + item.id]?.position
-                ? (progressMap[(item.type || 'movie') + ':' + item.id].position /
-                    (progressMap[(item.type || 'movie') + ':' + item.id].duration || 1)) * 100
-                : 0}
-              availability={availabilityStore?.[item.type + ':' + item.id]}
-              onPlay={onPlay}
-            />
-          ))}
-        </div>
-      ) : (
-        <ScrollRow label={title}>
-          {items.map((item) => (
-            <PosterCard
-              key={(item.type || 'media') + ':' + item.id}
-              item={item}
-              onOpen={onOpen}
-              shape={shape}
-              saved={savedIds?.has((item.type || 'movie') + ':' + item.id)}
-              progress={progressMap?.[(item.type || 'movie') + ':' + item.id]?.position
-                ? (progressMap[(item.type || 'movie') + ':' + item.id].position /
-                    (progressMap[(item.type || 'movie') + ':' + item.id].duration || 1)) * 100
-                : 0}
-              availability={availabilityStore?.[item.type + ':' + item.id]}
-              onPlay={onPlay}
-            />
-          ))}
-        </ScrollRow>
-      )}
+      {grid ? <div className="ls-grid">{cards}</div> : <ScrollRow label={title}>{cards}</ScrollRow>}
     </section>
   );
 }
 
-function ContinueWatchingShelf({ items, onOpen }) {
-  if (!items || !items.length) return null;
-  const remaining = (entry) => {
-    const left = Math.max(0, (entry.duration || 0) - (entry.position || 0));
-    if (!left) return '';
-    const minutes = Math.round(left / 60);
-    if (minutes < 60) return `${minutes}m left`;
-    return `${Math.floor(minutes / 60)}h ${minutes % 60}m left`;
-  };
+function ContinueWatching({ items, onOpen }) {
+  if (!items?.length) return null;
   return (
-    <section className="shelf continue-shelf">
-      <div className="shelf-header">
-        <div className="shelf-title-group">
-          <Heading level={2} className="shelf-heading">Continue watching</Heading>
-          <span className="shelf-subtitle">{items.length} in progress</span>
-        </div>
+    <section className="ls-shelf">
+      <div className="ls-shelf-head">
+        <h2 className="ls-shelf-title">Continue watching</h2>
+        <span className="ls-shelf-sub">{items.length} in progress</span>
       </div>
       <ScrollRow label="Continue watching">
         {items.map((item) => {
           const pct = Math.min(100, Math.max(1, (item.position / (item.duration || 1)) * 100));
           const backdrop = safeURL(item.background || item.poster);
-          const left = remaining(item);
+          const left = Math.max(0, (item.duration || 0) - (item.position || 0));
+          const mins = Math.round(left / 60);
+          const label = !mins ? 'Almost done' : mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m left` : `${mins}m left`;
           return (
             <button
               type="button"
               key={(item.type || 'media') + ':' + item.id}
-              className="continue-card"
+              className="ls-wide-card"
               onClick={() => onOpen(item)}
             >
-              <div
-                className="continue-media-box"
-                style={{ backgroundImage: backdrop ? `url(${backdrop})` : 'none' }}
-              >
-                <span className="continue-resume">
-                  <NuvioPlayIcon size={13} />
-                  {left || 'Resume'}
+              <div className="ls-wide-media" style={{ backgroundImage: backdrop ? `url(${backdrop})` : 'none' }}>
+                <span className="ls-wide-play" aria-hidden="true">
+                  <Play size={11} fill="currentColor" strokeWidth={0} />
                 </span>
-                <div className="continue-progress-track">
-                  <div className="continue-progress-fill" style={{ width: `${pct}%` }} />
-                </div>
+                <span className="ls-wide-badge">{label}</span>
+                <span className="ls-wide-bar" aria-hidden="true">
+                  <i style={{ width: `${pct}%` }} />
+                </span>
               </div>
-              <div className="continue-meta">
-                <span className="poster-title">{item.name || item.id}</span>
-                <span className="poster-sub">
-                  {item.playbackTitle || item.releaseInfo || `${Math.round(pct)}% watched`}
-                </span>
+              <div className="ls-wide-meta">
+                <span className="ls-poster-title">{item.name || item.id}</span>
+                <span className="ls-poster-meta">{item.playbackTitle || item.releaseInfo || `${Math.round(pct)}% watched`}</span>
               </div>
             </button>
           );
@@ -402,7 +288,7 @@ function ContinueWatchingShelf({ items, onOpen }) {
   );
 }
 
-function Catalog({ addon, catalog, shape, onOpen, onViewAll, onFeaturedItems, savedIds, progressMap, availabilityStore, onPlay }) {
+function Catalog({ addon, catalog, onOpen, onPlay, onViewAll, onFeaturedItems, savedIds, progressMap, availabilityStore }) {
   const ref = useRef(null);
   const [visible, setVisible] = useState(false);
   const [data, setData] = useState(null);
@@ -412,7 +298,7 @@ function Catalog({ addon, catalog, shape, onOpen, onViewAll, onFeaturedItems, sa
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
+        if (entries.some((entry) => entry.isIntersecting)) {
           setVisible(true);
           observer.disconnect();
         }
@@ -428,15 +314,11 @@ function Catalog({ addon, catalog, shape, onOpen, onViewAll, onFeaturedItems, sa
     let active = true;
     setError(false);
     resource(addon, 'catalog', catalog.type, catalog.id)
-      .then((d) => {
+      .then((result) => {
         if (!active) return;
-        const metas = dedupe(
-          (d.metas || []).map((m) => ({ ...m, type: m.type || catalog.type }))
-        ).slice(0, 24);
+        const metas = dedupe((result.metas || []).map((meta) => ({ ...meta, type: meta.type || catalog.type }))).slice(0, 24);
         setData(metas);
-        if (metas.length > 0 && onFeaturedItems) {
-          onFeaturedItems(metas.slice(0, 6));
-        }
+        if (metas.length && onFeaturedItems) onFeaturedItems(metas.slice(0, 6));
       })
       .catch(() => {
         if (active) setError(true);
@@ -446,51 +328,41 @@ function Catalog({ addon, catalog, shape, onOpen, onViewAll, onFeaturedItems, sa
     };
   }, [visible, attempt, addon, catalog]);
 
-  const typeText =
-    catalog.type === 'movie' ? 'Movies' : catalog.type === 'series' ? 'Series' : catalog.type;
+  const typeText = catalog.type === 'movie' ? 'Movies' : catalog.type === 'series' ? 'Series' : catalog.type;
   const label = `${catalog.name || catalog.id} · ${typeText}`;
 
   return (
-    <div ref={ref} className="catalog-slot">
+    <div ref={ref}>
       {data ? (
         <Shelf
           title={label}
           subtitle={addon.name}
           items={data}
-          shape={shape}
           onOpen={onOpen}
+          onPlay={onPlay}
           onViewAll={() => onViewAll({ title: label, subtitle: addon.name, items: data })}
           savedIds={savedIds}
           progressMap={progressMap}
           availabilityStore={availabilityStore}
-          onPlay={onPlay}
         />
       ) : (
-        <section className="shelf" aria-busy={visible && !error}>
-          <div className="shelf-header">
-            <div className="shelf-title-group">
-              <Heading level={2} className="shelf-heading">
-                {label}
-              </Heading>
-              <span className="shelf-subtitle">{addon.name}</span>
-            </div>
+        <section className="ls-shelf" aria-busy={visible && !error}>
+          <div className="ls-shelf-head">
+            <h2 className="ls-shelf-title">{label}</h2>
+            <span className="ls-shelf-sub">{addon.name}</span>
           </div>
           {error ? (
-            <HStack gap={3} vAlign="center">
-              <Message>Catalog unavailable.</Message>
-              <Button
-                variant="secondary"
-                icon={<Icon icon={RotateCw} />}
-                label="Try again"
-                onClick={() => setAttempt((a) => a + 1)}
-              />
-            </HStack>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--ls-3)' }}>
+              <p className="ls-note" style={{ padding: 'var(--ls-3)' }}>Catalog unavailable.</p>
+              <Button variant="secondary" size="sm" icon={<RotateCw size={14} />} label="Try again" onClick={() => setAttempt((n) => n + 1)} />
+            </div>
           ) : (
-            <div className="skeleton-poster-row" aria-label="Loading catalog">
-              {[0, 1, 2, 3, 4, 5].map((idx) => (
-                <div key={idx} className="skeleton-poster-item">
-                  <Skeleton width="100%" height={186} radius={3} index={idx} />
-                  <Skeleton width="78%" height={14} radius={1} index={idx} />
+            <div className="ls-row-scroll" aria-label="Loading catalog">
+              {[0, 1, 2, 3, 4, 5].map((index) => (
+                <div key={index} style={{ flex: '0 0 var(--ls-rail)', width: 'var(--ls-rail)' }}>
+                  <Skeleton height={Math.round(9.5 * 16 * 1.5)} radius={14} />
+                  <div style={{ height: 8 }} />
+                  <Skeleton height={12} width="78%" radius={4} />
                 </div>
               ))}
             </div>
@@ -501,19 +373,16 @@ function Catalog({ addon, catalog, shape, onOpen, onViewAll, onFeaturedItems, sa
   );
 }
 
-function Search({ addons, onOpen }) {
+/* ------------------------------ search ------------------------------ */
+
+function Search({ addons, onOpen, onPlay, savedIds, progressMap, availabilityStore }) {
   const [query, setQuery] = useState('');
   const [items, setItems] = useState(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const current = useRef(0);
 
-  useEffect(
-    () => () => {
-      current.current++;
-    },
-    []
-  );
+  useEffect(() => () => { current.current++; }, []);
 
   async function run(event) {
     event?.preventDefault();
@@ -521,34 +390,25 @@ function Search({ addons, onOpen }) {
     const token = ++current.current;
     setBusy(true);
     setFailed(false);
-    const catalogs = addons.flatMap((a) =>
-      (a.catalogs || [])
-        .filter((c) => (c.extra || []).some((e) => e.name === 'search'))
-        .map((c) => ({ a, c }))
+    const catalogs = addons.flatMap((addon) =>
+      (addon.catalogs || [])
+        .filter((catalog) => (catalog.extra || []).some((extra) => extra.name === 'search'))
+        .map((catalog) => ({ addon, catalog }))
     );
     setItems([]);
     let results = [];
     await Promise.allSettled(
-      catalogs.map(async ({ a, c }) => {
+      catalogs.map(async ({ addon, catalog }) => {
         try {
-          const data = await resource(
-            a,
-            'catalog',
-            c.type,
-            c.id,
-            '?search=' + encodeURIComponent(query.trim())
-          );
+          const data = await resource(addon, 'catalog', catalog.type, catalog.id, '?search=' + encodeURIComponent(query.trim()));
           if (token !== current.current) return;
-          results = dedupe([
-            ...results,
-            ...(data.metas || []).map((m) => ({ ...m, type: m.type || c.type }))
-          ]);
+          results = dedupe([...results, ...(data.metas || []).map((meta) => ({ ...meta, type: meta.type || catalog.type }))]);
           setItems(
             [...results]
               .sort(
-                (x, y) =>
-                  Number(y.name?.toLowerCase() === query.toLowerCase()) -
-                  Number(x.name?.toLowerCase() === query.toLowerCase())
+                (a, b) =>
+                  Number(b.name?.toLowerCase() === query.toLowerCase()) -
+                  Number(a.name?.toLowerCase() === query.toLowerCase())
               )
               .slice(0, 120)
           );
@@ -561,90 +421,69 @@ function Search({ addons, onOpen }) {
   }
 
   return (
-    <VStack gap={5} className="search-page">
-      <HStack as="form" className="search-form" gap={3} vAlign="end" onSubmit={run}>
-        <TextInput
-          startIcon={NuvioSearchIcon}
-          containerClassName="search-field"
-          label="Movie or series title"
-          type="search"
-          value={query}
-          onChange={setQuery}
-          hasClear
-          enterKeyHint="search"
-          placeholder="Search movies, series, anime, directors…"
-          autoComplete="off"
+    <div>
+      <form className="ls-search-bar" onSubmit={run}>
+        <Field label="Title" value={query} onChange={setQuery} placeholder="Search movies, series, anime…" />
+        <Button type="submit" variant="primary" icon={<SearchIcon size={16} />} label="Search" busy={busy} disabled={!query.trim()} />
+      </form>
+      {failed && <p className="ls-note" style={{ marginBottom: 'var(--ls-3)' }}>Some addon catalogs did not respond.</p>}
+      {busy && !items?.length && <p className="ls-note">Searching {addons.length} addons…</p>}
+      {items?.length ? (
+        <Shelf
+          title={`Results (${items.length})`}
+          items={items}
+          grid
+          onOpen={onOpen}
+          onPlay={onPlay}
+          savedIds={savedIds}
+          progressMap={progressMap}
+          availabilityStore={availabilityStore}
         />
-        <Button
-          icon={<NuvioSearchIcon size={16} />}
-          type="submit"
-          label="Search"
-          variant="primary"
-          isLoading={busy}
-          isDisabled={!query.trim()}
-        />
-      </HStack>
-      <VStack gap={4} aria-live="polite" aria-busy={busy}>
-        {failed && <Message>Some addon catalogs did not respond.</Message>}
-        {busy && <Message>Searching across {addons.length} addons…</Message>}
-        {items?.length ? (
-          <Shelf
-            title={`Results (${items.length})`}
-            items={items}
-            grid
-            savedIds={savedIds}
-            progressMap={progressMap}
-            availabilityStore={availabilityStore}
-            onOpen={onOpen}
-            onPlay={onPlay}
-          />
-        ) : items ? (
-          <Message>No matches found. Try another title.</Message>
-        ) : (
-          <Text color="secondary">
-            Enter a title above to search Cinemeta, AIOStreams, TMDB, IMDb, and anime catalogs simultaneously.
-          </Text>
-        )}
-      </VStack>
-    </VStack>
+      ) : items ? (
+        <p className="ls-note">No matches. Try another title.</p>
+      ) : (
+        <p className="ls-note">Enter a title to search every configured catalog at once.</p>
+      )}
+    </div>
   );
 }
 
-function useMediaQuery(query) {
-  const [matches, setMatches] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia(query).matches
-  );
-  useEffect(() => {
-    const list = window.matchMedia(query);
-    const sync = () => setMatches(list.matches);
-    sync();
-    list.addEventListener('change', sync);
-    return () => list.removeEventListener('change', sync);
-  }, [query]);
-  return matches;
-}
+/* ------------------------------ title takeover ------------------------------ */
 
-function TitleDialog({ item, addons, saved, onSave, onPlayStream, onClose, autoStart = false, initialPicker = false, addonsLoading = false }) {
+function TitlePage({
+  item,
+  addons,
+  saved,
+  onSave,
+  onPlayStream,
+  onClose,
+  autoStart = false,
+  initialPicker = false,
+  addonsLoading = false,
+  onEpisode
+}) {
   const wide = useMediaQuery('(min-width: 48rem)');
-  const [selectingStream, setSelectingStream] = useState(false);
   const [meta, setMeta] = useState(item);
   const [loading, setLoading] = useState(true);
   const [season, setSeason] = useState('');
-  const [tab, setTab] = useState('episodes');
+  const [showStreams, setShowStreams] = useState(initialPicker || autoStart);
+  const [pickerRequest, setPickerRequest] = useState(initialPicker ? 1 : 0);
   const [autoPlayId, setAutoPlayId] = useState(null);
-  const [pickerRequest, setPickerRequest] = useState(0);
   const [selected, setSelected] = useState(
-    item.playbackId ? { id: item.playbackId, playbackTitle: item.playbackTitle } : item.type !== 'series' ? { id: item.id } : null
+    item.playbackId
+      ? { id: item.playbackId, playbackTitle: item.playbackTitle }
+      : item.type !== 'series'
+        ? { id: item.id }
+        : null
   );
 
   useEffect(() => {
     let active = true;
-    // Ask every metadata addon and merge: one supplies certification, another ratings.
     Promise.allSettled(
       addons
-        .filter((a) => supports(a, 'meta', item.type))
-        .map(async (a) => {
-          const data = await resource(a, 'meta', item.type, item.id);
+        .filter((addon) => supports(addon, 'meta', item.type))
+        .map(async (addon) => {
+          const data = await resource(addon, 'meta', item.type, item.id);
           if (!data.meta) throw Error('No metadata');
           return data.meta;
         })
@@ -653,28 +492,23 @@ function TitleDialog({ item, addons, saved, onSave, onPlayStream, onClose, autoS
         if (!active) return;
         const answers = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
         if (!answers.length) throw Error('No metadata');
-        const mergedAnswer = answers.reduce((acc, meta) => {
-          for (const [key, value] of Object.entries(meta)) {
-            const current = acc[key];
-            const empty = current === undefined || current === null || current === '' ||
-              (Array.isArray(current) && !current.length);
+        const merged = answers.reduce((acc, next) => {
+          for (const [key, value] of Object.entries(next)) {
+            const empty =
+              acc[key] === undefined || acc[key] === null || acc[key] === '' ||
+              (Array.isArray(acc[key]) && !acc[key].length);
             if (empty) acc[key] = value;
-            else if (key === 'app_extras' && value && typeof value === 'object') {
-              acc[key] = { ...value, ...acc[key] };
-            }
+            else if (key === 'app_extras' && value && typeof value === 'object') acc[key] = { ...value, ...acc[key] };
           }
           return acc;
         }, {});
-        const merged = { ...item, ...mergedAnswer };
-        setMeta(merged);
+        const combined = { ...item, ...merged };
+        setMeta(combined);
         rememberTitleMeta(
-          (merged.type || 'movie') + ':' + merged.id,
-          { cert: certificationOf(merged), rt: rottenTomatoesOf(merged) }
+          (combined.type || 'movie') + ':' + combined.id,
+          { cert: certificationOf(combined), rt: rottenTomatoesOf(combined) }
         );
-        const vids = (merged.videos || []).filter((v) => v.id);
-        if (merged.type !== 'series' && !vids.length) {
-          setSelected({ id: merged.id });
-        }
+        if (combined.type !== 'series') setSelected({ id: combined.id });
       })
       .catch(() => {})
       .finally(() => {
@@ -685,280 +519,292 @@ function TitleDialog({ item, addons, saved, onSave, onPlayStream, onClose, autoS
     };
   }, [item, addons]);
 
-  const episodes = (meta.videos || []).filter((v) => v.id);
-  const seasons = [...new Set(episodes.map((v) => String(v.season ?? 0)))].sort(
-    (a, b) => Number(a) - Number(b)
-  );
-  const activeSeason = season || seasons.find((s) => Number(s) > 0) || seasons[0] || '';
-  const isSaved = saved.some((s) => s.type === meta.type && s.id === meta.id);
-  const movie = meta.type !== 'series' && !episodes.length;
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [onClose]);
+
+  const episodes = (meta.videos || []).filter((video) => video.id);
+  const seasons = [...new Set(episodes.map((video) => String(video.season ?? 0)))].sort((a, b) => Number(a) - Number(b));
+  const activeSeason = season || seasons.find((value) => Number(value) > 0) || seasons[0] || '';
+  const isSaved = saved.some((entry) => entry.type === meta.type && entry.id === meta.id);
+  const isSeries = meta.type === 'series' && episodes.length > 0;
   const backdrop = safeURL(meta.background || meta.banner || meta.poster);
-  const poster = safeURL(meta.poster || meta.background);
   const logo = safeURL(meta.logo);
-  const rating = meta.imdbRating || meta.rating;
-  const cast = Array.isArray(meta.cast) ? meta.cast.slice(0, 6) : [];
   const title = meta.name || meta.title || meta.id;
-  const certification = certificationOf(meta);
+  const rating = meta.imdbRating || meta.rating;
+  const cert = certificationOf(meta);
   const awards = awardsBadge(meta.awards);
   const runtime = runtimeLabel(meta.runtime);
+  const cast = Array.isArray(meta.cast) ? meta.cast.slice(0, 6) : [];
+  const genres = (meta.genres || meta.genre || []).slice(0, 3);
 
   const facts = (
-    <div className="detail-facts">
+    <div className="ls-hero-facts">
       {rating && <ImdbBadge rating={rating} size="sm" />}
-      {(meta.releaseInfo || meta.year) && (
-        <span className="detail-fact">{meta.releaseInfo || meta.year}</span>
-      )}
-      {runtime && <span className="detail-fact">{runtime}</span>}
-      {certification && <span className="detail-fact is-boxed">{certification}</span>}
-      {awards && <span className="detail-fact is-accent">{awards}</span>}
-      {meta.type === 'series' && episodes.length > 0 && (
-        <span className="detail-fact">{episodeSummary(episodes)}</span>
+      {(meta.releaseInfo || meta.year) && <span>{meta.releaseInfo || meta.year}</span>}
+      {runtime && <span>{runtime}</span>}
+      {cert && <span className="is-cert">{cert}</span>}
+      {isSeries && <span>{episodeSummary(episodes)}</span>}
+      {awards && <span className="is-accent">{awards}</span>}
+      {genres.length > 0 && (
+        <>
+          <span className="sep">·</span>
+          <span>{genres.join(', ')}</span>
+        </>
       )}
     </div>
   );
 
   const actions = (
-    <div className="detail-actions">
-      {selected && (
-        <button
-          type="button"
-          className="detail-btn is-primary"
-          onClick={() => {
-            setAutoPlayId(selected.id);
-            if (!wide) setTab('streams');
-          }}
-        >
-          <NuvioPlayIcon size={15} />
-          {movie ? 'Play' : 'Play episode'}
-        </button>
+    <div className="ls-takeover-actions">
+      {!isSeries && (
+        <>
+          <Button
+            variant="primary"
+            icon={<Play size={15} fill="currentColor" strokeWidth={0} />}
+            label="Play"
+            onClick={() => {
+              setSelected({ id: meta.id });
+              setShowStreams(true);
+              setAutoPlayId(meta.id);
+            }}
+          />
+          <Button
+            variant="secondary"
+            label="Choose stream"
+            onClick={() => {
+              setShowStreams(true);
+              setPickerRequest((n) => n + 1);
+            }}
+          />
+        </>
       )}
-      <button
-        type="button"
-        className="detail-btn"
-        onClick={() => {
-          setAutoPlayId(null);
-          setTab('streams');
-          if (!selected) setSelected({ id: meta.id });
-          setPickerRequest((n) => n + 1);
-        }}
-      >
-        Choose stream
-      </button>
-      <button
-        type="button"
-        className="detail-btn is-ghost"
+      <Button
+        variant="secondary"
+        icon={isSaved ? <BookmarkCheck size={15} /> : <Bookmark size={15} />}
+        label={isSaved ? 'Saved' : 'Watchlist'}
         aria-pressed={isSaved}
         onClick={() => onSave(meta)}
-      >
-        <Icon icon={isSaved ? BookmarkCheck : Bookmark} size="sm" />
-        {isSaved ? 'Saved' : 'Watchlist'}
-      </button>
+      />
+      <IconButton icon={<ChevronLeft size={18} />} label="Back" onClick={onClose} />
     </div>
   );
 
-  const overview = (
-    <>
-      <p className="detail-synopsis">{meta.description || meta.synopsis || 'No description available.'}</p>
-      {cast.length > 0 && (
-        <div className="detail-cast-row">
-          <span className="detail-cast-label">Cast</span>
-          {cast.map((person) => (
-            <span key={person} className="detail-cast-chip">{person}</span>
-          ))}
-        </div>
-      )}
-      {(meta.genres || []).length > 0 && (
-        <div className="detail-cast-row">
-          <span className="detail-cast-label">Genre</span>
-          {meta.genres.map((g) => (
-            <span key={g} className="detail-cast-chip">{g}</span>
-          ))}
-        </div>
-      )}
-    </>
-  );
-
-  const episodeList = !movie && (
-    <div className="episode-block">
-      <div className="episode-block-head">
-        <h3>Episodes</h3>
-        {seasons.length > 1 && (
-          <div className="season-tabs" role="tablist" aria-label="Season">
-            {seasons.map((value) => (
-              <button
-                key={value}
-                type="button"
-                role="tab"
-                aria-selected={activeSeason === value}
-                className={activeSeason === value ? 'is-active' : ''}
-                onClick={() => {
-                  setSeason(value);
-                  setSelected(null);
-                }}
-              >
-                {value === '0' ? 'Specials' : `S${value}`}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      <div className="episode-list">
-        {episodes
-          .filter((v) => String(v.season ?? 0) === activeSeason)
-          .map((v) => {
-            const isEpSelected = selected?.id === v.id;
-            const thumb = safeURL(v.thumbnail || meta.background || meta.poster);
-            const epTitle = v.title || v.name || `Episode ${v.episode || ''}`;
-            const episodeEntry = {
-              ...v,
-              playbackTitle: `${title} · S${v.season || 1}:E${v.episode || 1}`
-            };
-            return (
-              <div key={v.id} className={`episode-row ${isEpSelected ? 'is-active' : ''}`}>
-                <button
-                  type="button"
-                  className="episode-main"
-                  aria-pressed={isEpSelected}
-                  onClick={() => {
-                    setSelected(episodeEntry);
-                    setAutoPlayId(null);
-                  }}
-                >
-                  {thumb && (
-                    <span className="episode-thumb-box">
-                      <img src={thumb} alt="" className="episode-thumb-img" loading="lazy" />
-                      <span className="episode-num-pill">
-                        S{v.season || 1}·E{v.episode || 1}
-                      </span>
-                    </span>
-                  )}
-                  <span className="episode-info-box">
-                    <span className="episode-title-text">{epTitle}</span>
-                    {v.overview && <span className="episode-overview-text">{v.overview}</span>}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="episode-play-btn"
-                  aria-label={`Play episode ${v.episode || ''} ${epTitle}`}
-                  title="Play this episode"
-                  onClick={() => {
-                    setSelected(episodeEntry);
-                    setAutoPlayId(v.id);
-                    if (!wide) setTab('streams');
-                  }}
-                >
-                  <NuvioPlayIcon size={15} />
-                </button>
-              </div>
-            );
-          })}
-      </div>
+  const sourcesBlock = showStreams && selected && (
+    <div className="ls-takeover-section">
+      <h2 className="ls-section-title">
+        Streams
+        {isSeries && selected.playbackTitle ? <span className="ls-shelf-sub">{selected.playbackTitle}</span> : null}
+      </h2>
+      <Sources
+        addons={addons}
+        meta={{ ...meta, runtime: selected.runtime || meta.runtime }}
+        videoId={selected.id}
+        autoStart={autoStart || autoPlayId === selected.id}
+        openPicker={pickerRequest}
+        showActions={false}
+        addonsLoading={addonsLoading}
+        onPlay={(streamObj, selection) =>
+          onPlayStream(streamObj, { ...meta, playbackId: selected.id, playbackTitle: selected.playbackTitle }, selection)
+        }
+      />
     </div>
-  );
-
-  const sources = selected && (
-    <Sources
-      addons={addons}
-      meta={{ ...meta, runtime: selected.runtime || meta.runtime }}
-      videoId={selected.id}
-      autoStart={autoStart || autoPlayId === selected.id}
-      initialPicker={initialPicker}
-      openPicker={pickerRequest}
-      showActions={!wide}
-      onSelectingChange={setSelectingStream}
-      addonsLoading={addonsLoading}
-      onPlay={(streamObj, selection) =>
-        onPlayStream(streamObj, {
-          ...meta,
-          playbackId: selected.id,
-          playbackTitle: selected.playbackTitle
-        }, selection)
-      }
-    />
   );
 
   return (
-    <Dialog
-      className={`title-dialog ${wide ? 'is-wide' : 'is-narrow'}`}
-      isOpen
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-      width={wide ? 'var(--ls-detail-width)' : 'min(100vw, 34rem)'}
-      maxHeight="92dvh"
-      padding={0}
-    >
-      <DialogHeader
-        title={title}
-        onOpenChange={(open) => {
-          if (!open) onClose();
-        }}
-      />
-      {selectingStream && (
-        <Text type="supporting" color="secondary" className="dialog-status">
-          Checking sources for your connection. Close this panel to cancel.
-        </Text>
+    <div className="ls-takeover">
+      <section className="ls-takeover-hero">
+        {backdrop && <img className="ls-hero-art" src={backdrop} alt="" />}
+        <div className="ls-hero-scrim" aria-hidden="true" />
+        <div className="ls-takeover-body">
+          <button type="button" className="ls-btn ls-btn--ghost ls-btn--sm" onClick={onClose} style={{ alignSelf: 'flex-start' }}>
+            <ChevronLeft size={15} /> Back
+          </button>
+          {logo ? <img className="ls-hero-logo" src={logo} alt={title} /> : <h1 className="ls-hero-title">{title}</h1>}
+          {facts}
+          {(meta.description || meta.synopsis) && (
+            <p className="ls-hero-synopsis">{meta.description || meta.synopsis}</p>
+          )}
+          {actions}
+        </div>
+      </section>
+
+      {!isSeries && !showStreams && (
+        <div className="ls-takeover-section">
+          {cast.length > 0 && (
+            <div className="ls-cast">
+              <span className="ls-cast-label">Cast</span>
+              {cast.map((person) => (
+                <span key={person} className="ls-cast-item">{person}</span>
+              ))}
+            </div>
+          )}
+          {loading && <p className="ls-note" style={{ marginTop: 'var(--ls-3)' }}>Loading full metadata…</p>}
+        </div>
       )}
 
-      {wide ? (
-        <div className="dialog-scroll detail-wide">
-          <div className="detail-aside">
-            {poster && <img src={poster} alt="" className="detail-poster" />}
-            {facts}
-            {actions}
+      {isSeries && (
+        <div className="ls-takeover-section">
+          <div className="ls-section-title">
+            Episodes
+            {seasons.length > 1 && (
+              <span className="ls-season-tabs">
+                {seasons.map((value) => (
+                  <Chip
+                    key={value}
+                    active={activeSeason === value}
+                    onClick={() => {
+                      setSeason(value);
+                      setSelected(null);
+                    }}
+                  >
+                    {value === '0' ? 'Specials' : `S${value}`}
+                  </Chip>
+                ))}
+              </span>
+            )}
           </div>
-          <div className="detail-main">
-            {overview}
-            {loading && <Message>Loading full metadata…</Message>}
-            {episodeList}
-            {sources}
+          <div className="ls-episode-list">
+            {episodes
+              .filter((video) => String(video.season ?? 0) === activeSeason)
+              .map((video) => {
+                const thumb = safeURL(video.thumbnail || meta.background || meta.poster);
+                const epTitle = video.title || video.name || `Episode ${video.episode || ''}`;
+                const entry = {
+                  ...video,
+                  playbackTitle: `${title} · S${video.season || 1}:E${video.episode || 1}`
+                };
+                return (
+                  <div key={video.id} className="ls-episode">
+                    <button type="button" className="ls-episode-main" onClick={() => onEpisode(entry)}>
+                      {thumb && (
+                        <span className="ls-episode-thumb">
+                          <img src={thumb} alt="" loading="lazy" />
+                          <span className="ls-episode-num">S{video.season || 1}·E{video.episode || 1}</span>
+                        </span>
+                      )}
+                      <span className="ls-episode-info">
+                        <span className="ls-episode-title">{epTitle}</span>
+                        {video.overview && <span className="ls-episode-overview">{video.overview}</span>}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="ls-episode-play"
+                      aria-label={`Play episode ${video.episode || ''} ${epTitle}`}
+                      title="Play best stream"
+                      onClick={() => onEpisode(entry, { play: true })}
+                    >
+                      <Play size={14} fill="currentColor" strokeWidth={0} />
+                    </button>
+                  </div>
+                );
+              })}
           </div>
-        </div>
-      ) : (
-        <div className="dialog-scroll detail-narrow">
-          <div
-            className="detail-banner"
-            style={{ backgroundImage: backdrop ? `url(${backdrop})` : 'none' }}
-          >
-            <div className="detail-banner-scrim" />
-            <div className="detail-banner-body">
-              {logo ? <img src={logo} alt="" className="detail-clearlogo" /> : <h2>{title}</h2>}
-              {facts}
-            </div>
-          </div>
-          {actions}
-          <div className="detail-tabs" role="tablist">
-            {[
-              ['episodes', 'Episodes', !movie],
-              ['overview', 'Overview', true],
-              ['streams', 'Streams', Boolean(selected)]
-            ]
-              .filter(([, , show]) => show)
-              .map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === id}
-                  className={tab === id ? 'is-active' : ''}
-                  onClick={() => setTab(id)}
-                >
-                  {label}
-                </button>
+          {cast.length > 0 && (
+            <div className="ls-cast" style={{ marginTop: 'var(--ls-5)' }}>
+              <span className="ls-cast-label">Cast</span>
+              {cast.map((person) => (
+                <span key={person} className="ls-cast-item">{person}</span>
               ))}
-          </div>
-          <div className="detail-pane">
-            {tab === 'episodes' && episodeList}
-            {tab === 'overview' && overview}
-            {tab === 'streams' && sources}
-            {tab === 'episodes' && movie && overview}
-          </div>
+            </div>
+          )}
         </div>
       )}
-    </Dialog>
+
+      {sourcesBlock}
+    </div>
   );
 }
+
+function EpisodePage({ episode, showTitle, addons, onPlayStream, onBack, onChooseStream, autoStart = false, initialPicker = false, addonsLoading = false }) {
+  const backdrop = safeURL(episode.thumbnail || episode.background || episode.poster);
+  const [showStreams, setShowStreams] = useState(initialPicker || autoStart);
+  const [pickerRequest, setPickerRequest] = useState(initialPicker ? 1 : 0);
+  const [autoPlay, setAutoPlay] = useState(autoStart);
+
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === 'Escape') onBack();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onBack]);
+
+  return (
+    <div className="ls-takeover">
+      <section className="ls-takeover-hero" style={{ minHeight: '18rem' }}>
+        {backdrop && <img className="ls-hero-art" src={backdrop} alt="" />}
+        <div className="ls-hero-scrim" aria-hidden="true" />
+        <div className="ls-takeover-body">
+          <button type="button" className="ls-btn ls-btn--ghost ls-btn--sm" onClick={onBack} style={{ alignSelf: 'flex-start' }}>
+            <ChevronLeft size={15} /> {showTitle}
+          </button>
+          <h1 className="ls-hero-title" style={{ fontSize: 'clamp(1.5rem,3.4vw,2.25rem)' }}>
+            {episode.title || episode.name || `Episode ${episode.episode || ''}`}
+          </h1>
+          <div className="ls-hero-facts">
+            <span>S{episode.season || 1} · E{episode.episode || 1}</span>
+            {episode.runtime && (
+              <>
+                <span className="sep">·</span>
+                <span>{runtimeLabel(episode.runtime)}</span>
+              </>
+            )}
+          </div>
+          {episode.overview && <p className="ls-hero-synopsis">{episode.overview}</p>}
+          <div className="ls-takeover-actions">
+            <Button
+              variant="primary"
+              icon={<Play size={15} fill="currentColor" strokeWidth={0} />}
+              label="Play"
+              onClick={() => {
+                setAutoPlay(true);
+                setShowStreams(true);
+                setPickerRequest((n) => n + 1);
+              }}
+            />
+            <Button
+              variant="secondary"
+              label="Choose stream"
+              onClick={() => {
+                setShowStreams(true);
+                setPickerRequest((n) => n + 1);
+              }}
+            />
+          </div>
+        </div>
+      </section>
+
+      {showStreams && (
+        <div className="ls-takeover-section">
+          <h2 className="ls-section-title">Streams</h2>
+          <Sources
+            addons={addons}
+            meta={{ ...episode, type: episode.type || 'series' }}
+            videoId={episode.id}
+            autoStart={autoPlay}
+            openPicker={pickerRequest}
+            showActions={false}
+            addonsLoading={addonsLoading}
+            onPlay={(streamObj, selection) => onPlayStream(streamObj, episode, selection)}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------ app ------------------------------ */
 
 export function App({ onThemeChange }) {
   const [user, setUser] = useState(null);
@@ -968,18 +814,14 @@ export function App({ onThemeChange }) {
   const [route, setRoute] = useState(location.hash.slice(1) || 'home');
   const [item, setItem] = useState(null);
   const [playbackIntent, setPlaybackIntent] = useState(null);
-  const [alternatives, setAlternatives] = useState([]);
-  const openTitle = (target, intent = null) => {
-    setPlaybackIntent(intent);
-    setItem(target);
-  };
+  const [episode, setEpisode] = useState(null);
   const [expandedCatalog, setExpandedCatalog] = useState(null);
   const [activeStream, setActiveStream] = useState(null);
   const [playingMeta, setPlayingMeta] = useState(null);
   const [saved, setSaved] = useState([]);
   const [progress, setProgress] = useState({});
   const [featuredItems, setFeaturedItems] = useState([]);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [preferences, setPreferences] = useState(DEFAULT_PREFERENCES);
   const [collectionFilter, setCollectionFilter] = useState('all');
   const [availabilityStore, setAvailabilityStore] = useState(() => readAvailabilityStore());
@@ -988,7 +830,12 @@ export function App({ onThemeChange }) {
     () => new Set(saved.map((entry) => (entry.type || 'movie') + ':' + entry.id)),
     [saved]
   );
-  const refreshAvailability = () => setAvailabilityStore(readAvailabilityStore());
+
+  const openTitle = (target, intent = null) => {
+    setPlaybackIntent(intent);
+    setEpisode(null);
+    setItem(target);
+  };
 
   async function boot() {
     setError('');
@@ -998,11 +845,7 @@ export function App({ onThemeChange }) {
       setUser(me);
       setSaved(readState(me.id, 'saved', []));
       setProgress(readState(me.id, 'progress', {}));
-
-      const savedPrefs = {
-        ...DEFAULT_PREFERENCES,
-        ...readState(me.id, 'preferences', DEFAULT_PREFERENCES)
-      };
+      const savedPrefs = { ...DEFAULT_PREFERENCES, ...readState(me.id, 'preferences', DEFAULT_PREFERENCES) };
       setPreferences(savedPrefs);
       applyPaletteToDOM(savedPrefs);
       onThemeChange?.(savedPrefs);
@@ -1010,12 +853,10 @@ export function App({ onThemeChange }) {
       setAddons(null);
       const response = await fetch('/api/addons?live=1', { credentials: 'same-origin' });
       if (!response.ok) throw Error('Could not load addons. Reload to try again.');
-
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
       const found = [];
-
       while (true) {
         const { value, done } = await reader.read();
         buffer += decoder.decode(value, { stream: !done });
@@ -1042,22 +883,21 @@ export function App({ onThemeChange }) {
     const handleHash = () => {
       setRoute(location.hash.slice(1) || 'home');
       setItem(null);
+      setEpisode(null);
     };
     window.addEventListener('hashchange', handleHash);
     return () => window.removeEventListener('hashchange', handleHash);
   }, []);
 
-  const handleApplyPreferences = (newPrefs) => {
-    setPreferences(newPrefs);
-    applyPaletteToDOM(newPrefs);
-    onThemeChange?.(newPrefs);
+  const handleApplyPreferences = (next) => {
+    setPreferences(next);
+    applyPaletteToDOM(next);
+    onThemeChange?.(next);
     try {
-      localStorage.setItem('librestream:active_palette', newPrefs.palette);
-      localStorage.setItem('librestream:active_accent', newPrefs.accent);
-      localStorage.setItem('librestream:active_font', newPrefs.font || 'nuvio');
-      if (user?.id) {
-        writeState(user.id, 'preferences', newPrefs);
-      }
+      localStorage.setItem('librestream:active_palette', next.palette);
+      localStorage.setItem('librestream:active_accent', next.accent);
+      localStorage.setItem('librestream:active_font', next.font || 'graphite');
+      if (user?.id) writeState(user.id, 'preferences', next);
     } catch {}
   };
 
@@ -1081,19 +921,16 @@ export function App({ onThemeChange }) {
   };
 
   const startPlayback = (streamObj, mediaMeta, selection) => {
-    refreshAvailability();
-    setAlternatives(selection?.alternatives || []);
     setActiveStream(streamObj);
     setPlayingMeta(mediaMeta);
     setItem(null);
+    setEpisode(null);
   };
 
   const handleFeaturedItems = (incoming) => {
     setFeaturedItems((old) => dedupe([...old, ...incoming]).slice(0, 8));
   };
 
-  // Fill poster strips for the first visible titles. One controller for the page
-  // lifetime, so a re-render never cancels a run half way.
   const prefetchRef = useRef({ controller: null, seen: new Set() });
   useEffect(() => {
     if (!addons?.length || !featuredItems.length) return;
@@ -1101,8 +938,9 @@ export function App({ onThemeChange }) {
     const controller = prefetchRef.current.controller;
     const timer = setTimeout(() => {
       if (controller.signal.aborted) return;
-      const targets = titlesNeedingAvailability(featuredItems.slice(0, 16), readAvailabilityStore(), 12)
-        .filter((target) => !prefetchRef.current.seen.has(target.key));
+      const targets = titlesNeedingAvailability(featuredItems.slice(0, 16), readAvailabilityStore(), 12).filter(
+        (target) => !prefetchRef.current.seen.has(target.key)
+      );
       if (!targets.length) return;
       targets.forEach((target) => prefetchRef.current.seen.add(target.key));
       prefetchAvailability(targets, {
@@ -1117,23 +955,20 @@ export function App({ onThemeChange }) {
 
   useEffect(() => () => prefetchRef.current.controller?.abort(), []);
 
-  const allCatalogs = (addons || []).flatMap((a) =>
-    (a.catalogs || [])
-      .filter((c) => !(c.extra || []).some((e) => e.isRequired))
-      .map((c) => ({ a, c }))
+  const allCatalogs = (addons || []).flatMap((addon) =>
+    (addon.catalogs || [])
+      .filter((catalog) => !(catalog.extra || []).some((extra) => extra.isRequired))
+      .map((catalog) => ({ addon, catalog }))
   );
 
-  const catalogs = allCatalogs.filter(({ c }) => {
-    if (collectionFilter === 'movies') return c.type === 'movie';
-    if (collectionFilter === 'series') return c.type === 'series';
+  const catalogs = allCatalogs.filter(({ catalog }) => {
+    if (collectionFilter === 'movies') return catalog.type === 'movie';
+    if (collectionFilter === 'series') return catalog.type === 'series';
     return true;
   });
 
-  const resume = Object.values(progress).filter(
-    (x) => x.position > 10 && x.position < x.duration - 30
-  );
-
-  const activePalette = PALETTES.find((p) => p.id === preferences.palette) || PALETTES[0];
+  const resume = Object.values(progress).filter((entry) => entry.position > 10 && entry.position < entry.duration - 30);
+  const activePalette = PALETTES.find((palette) => palette.id === preferences.palette) || PALETTES[0];
 
   if (activeStream && playingMeta) {
     return (
@@ -1143,368 +978,290 @@ export function App({ onThemeChange }) {
         user={user}
         addons={addons || []}
         videoId={playingMeta.playbackId}
-        playerStyle={preferences.player}
         onProgress={saveProgress}
-        onBack={() => { setActiveStream(null); setAlternatives([]); }}
-        onFailure={(position) => {
-          if (!alternatives.length) return false;
-          setActiveStream(alternatives[0]);
-          setAlternatives(old => old.slice(1));
-          setPlayingMeta(old => ({ ...old, resumePosition: position || old.resumePosition }));
-          return true;
+        onBack={() => {
+          setActiveStream(null);
+          setAvailabilityStore(readAvailabilityStore());
         }}
         onSwitchSource={() => {
+          const target = playingMeta;
           setActiveStream(null);
-          setAlternatives([]);
-          openTitle(playingMeta, 'choose');
+          openTitle({ ...target, id: target.playbackId ? target.id : target.id, type: target.type }, 'choose');
         }}
       />
     );
   }
 
-  const navDestinations = [
+  const nav = [
     ['home', 'Browse', NuvioHomeIcon],
     ['search', 'Search', NuvioSearchIcon],
     ['library', 'Saved', NuvioLibraryIcon],
-    ['themes', 'Themes', NuvioPaletteIcon],
+    ['appearance', 'Appearance', NuvioPaletteIcon],
     ['settings', 'Settings', NuvioSettingsIcon]
   ];
 
+  const shelfProps = {
+    onOpen: openTitle,
+    onPlay: (target) => openTitle(target, 'auto'),
+    savedIds,
+    progressMap: progress,
+    availabilityStore
+  };
+
   return (
-    <AppShell
-      height="auto"
-      mobileNav={false}
-      variant="wash"
-      contentPadding={0}
-      topNav={
-        <header className="nuvio-top-bar">
-          <a href="#home" className="brand-link" aria-label="LibreStream Home">
-            <Brand />
-          </a>
+    <div className="ls-app">
+      <a className="skip-link" href="#content">Skip to content</a>
 
-          {/* Desktop Center Navigation */}
-          <nav className="desktop-nav-pills" aria-label="Desktop navigation">
-            {navDestinations.map(([id, label, Glyph]) => {
-              const active = route === id;
-              return (
-                <a
-                  key={id}
-                  href={'#' + id}
-                  className={`desktop-nav-item ${active ? 'active' : ''}`}
-                  aria-current={active ? 'page' : undefined}
-                >
-                  <Glyph size={17} />
-                  <span>{label}</span>
-                </a>
-              );
-            })}
-          </nav>
-
-          {/* Right Quick Actions (Never truncates brand on mobile) */}
-          <div className="header-actions-group">
-            <button
-              type="button"
-              className="header-theme-trigger"
-              onClick={() => setShowSettingsModal(true)}
-              aria-label="Appearance & Themes"
-              title={`Theme: ${activePalette.name}`}
-            >
-              <span
-                className="header-theme-dot"
-                style={{ backgroundColor: preferences.accent || activePalette.accent }}
-              />
-              <NuvioPaletteIcon size={16} />
-              <span className="header-theme-label">{activePalette.name}</span>
-            </button>
-
-            <a
-              href="#settings"
-              className="header-user-pill"
-              title={`Signed in as ${user?.name || 'LibreStream'}`}
-            >
-              <span className="header-user-avatar">
-                {(user?.name || 'L').slice(0, 1).toUpperCase()}
-              </span>
-              <span className="header-user-name">{user?.name || 'Profile'}</span>
-            </a>
-          </div>
-        </header>
-      }
-    >
-      {/* Nuvio Mobile Floating Glass Pill Navigation Bar (4 primary tabs so labels never clip at 320px) */}
-      <nav className="app-nav" aria-label="Main navigation">
-        {navDestinations
-          .filter(([id]) => id !== 'themes')
-          .map(([id, label, Glyph]) => {
-            const active = route === id || (id === 'settings' && route === 'themes');
-            return (
-              <a
-                key={id}
-                href={'#' + id}
-                className={`mobile-nav-tab ${active ? 'active' : ''}`}
-                aria-current={active ? 'page' : undefined}
-              >
-                <span className="mobile-nav-icon">
-                  <Glyph size={19} />
-                </span>
-                <span className="mobile-nav-label">{label}</span>
+      <header className="ls-dock-top">
+        <a className="ls-brand" href="#home" aria-label="LibreStream home">
+          <span className="ls-brand-mark">L</span>
+          <Brand wordmark />
+        </a>
+        <nav className="ls-nav" aria-label="Main">
+          {nav
+            .filter(([id]) => id !== 'appearance')
+            .map(([id, label]) => (
+              <a key={id} href={`#${id}`} className={route === id ? 'active' : ''} aria-current={route === id ? 'page' : undefined}>
+                {label}
               </a>
-            );
-          })}
-      </nav>
+            ))}
+        </nav>
+        <div className="ls-dock-actions">
+          <button type="button" className="ls-dock-pill" onClick={() => setShowSettings(true)} title="Appearance">
+            <span className="ls-dock-dot" style={{ background: activePalette.accentSecondary }} />
+            {activePalette.name}
+          </button>
+          <a className="ls-avatar" href="#settings" title={user?.name || 'Profile'}>
+            {(user?.name || 'L').slice(0, 1).toUpperCase()}
+          </a>
+        </div>
+      </header>
 
-      <div className="app-main">
+      <main className="ls-main" id="content">
         {error ? (
-          <VStack gap={4} className="page-section">
-            <Message>{error}</Message>
-            <Button icon={<Icon icon={RotateCw} />} label="Try again" onClick={boot} />
-          </VStack>
+          <div className="ls-page">
+            <p className="ls-note" style={{ marginBottom: 'var(--ls-3)' }}>{error}</p>
+            <Button variant="secondary" icon={<RotateCw size={15} />} label="Try again" onClick={boot} />
+          </div>
         ) : !addons ? (
-          <VStack gap={4} className="page-section">
-            <Message>Loading your streaming catalogs…</Message>
-            <div className="skeleton-poster-row">
-              {[0, 1, 2, 3, 4].map((i) => (
-                <div key={i} className="skeleton-poster-item">
-                  <Skeleton width="100%" height={186} radius={3} index={i} />
-                  <Skeleton width="75%" height={14} radius={1} index={i} />
+          <div className="ls-page">
+            <Skeleton height={280} radius={18} />
+            <div style={{ height: 24 }} />
+            <div className="ls-row-scroll">
+              {[0, 1, 2, 3, 4, 5].map((index) => (
+                <div key={index} style={{ flex: '0 0 var(--ls-rail)', width: 'var(--ls-rail)' }}>
+                  <Skeleton height={228} radius={14} />
                 </div>
               ))}
             </div>
-          </VStack>
+          </div>
         ) : route === 'search' ? (
-          <section className="page-section">
-            <h1 className="page-title">Search</h1>
-            <Search addons={addons} onOpen={openTitle} />
-          </section>
+          <div className="ls-page">
+            <h1 className="ls-page-title">Search</h1>
+            <Search addons={addons} {...shelfProps} />
+          </div>
         ) : route === 'library' ? (
-          <section className="page-section">
-            <h1 className="page-title">Saved</h1>
+          <div className="ls-page">
+            <h1 className="ls-page-title">Saved</h1>
             {saved.length ? (
-              <div className="shelf shelf-inline">
-                <Shelf
-                  title="Watchlist"
-                  subtitle={`${saved.length} saved`}
-                  items={saved}
-                  grid
-                  savedIds={savedIds}
-                  progressMap={progress}
-                  availabilityStore={availabilityStore}
-                  onOpen={openTitle}
-                  onPlay={(target) => openTitle(target, 'auto')}
-                />
-              </div>
+              <Shelf title="Watchlist" subtitle={`${saved.length} titles`} items={saved} grid {...shelfProps} />
             ) : (
-              <p className="empty-note">
-                Nothing saved yet. Open a title and choose Add to Watchlist.
-              </p>
+              <p className="ls-note">Nothing saved yet. Open a title and choose Watchlist.</p>
             )}
-          </section>
-        ) : route === 'themes' ? (
-          <section className="page-section">
-            <h1 className="page-title">Appearance</h1>
-            <AppearanceContent
-              currentPreferences={preferences}
-              onApply={handleApplyPreferences}
-            />
-          </section>
+          </div>
+        ) : route === 'appearance' ? (
+          <div className="ls-page">
+            <h1 className="ls-page-title">Appearance</h1>
+            <AppearanceContent currentPreferences={preferences} onApply={handleApplyPreferences} />
+          </div>
         ) : route === 'settings' ? (
-          <section className="page-section">
-            <h1 className="page-title">Settings</h1>
-            <VStack gap={6}>
-                  <div className="settings-profile-banner">
-                    <div className="settings-avatar-lg">
-                      {(user?.name || 'L').slice(0, 1).toUpperCase()}
-                    </div>
-                    <VStack gap={1}>
-                      <Heading level={3}>{user?.name || 'Authenticated User'}</Heading>
-                      <Text type="supporting" color="secondary">
-                        Signed in with Authentik. Watchlist, resume points and appearance are saved in this browser for your account.
-                      </Text>
-                    </VStack>
-                  </div>
+          <div className="ls-page">
+            <h1 className="ls-page-title">Settings</h1>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--ls-6)' }}>
+              <div className="ls-profile">
+                <div className="ls-profile-avatar">{(user?.name || 'L').slice(0, 1).toUpperCase()}</div>
+                <div>
+                  <b>{user?.name || 'Signed in'}</b>
+                  <span>Authentik identity. Watchlist, resume points and appearance are stored in this browser for your account.</span>
+                </div>
+              </div>
 
-                  {/* Direct inline Appearance & Theme Customizer */}
-                  <AppearanceContent
-                    currentPreferences={preferences}
-                    onApply={handleApplyPreferences}
+              <AppearanceContent currentPreferences={preferences} onApply={handleApplyPreferences} />
+
+              <div>
+                <div className="ls-shelf-head">
+                  <h2 className="ls-shelf-title">Addons</h2>
+                  <span className="ls-shelf-sub">{addons.length} configured</span>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<RotateCw size={14} />}
+                    label="Refresh"
+                    onClick={async () => setAddons(await api('/api/addons'))}
+                    style={{ marginInlineStart: 'auto' }}
                   />
-
-                  <VStack gap={3}>
-                    <HStack vAlign="center" hAlign="between" wrap="wrap">
-                      <Heading level={2}>Connected Addon Providers ({addons.length})</Heading>
-                      <Button
-                        variant="secondary"
-                        icon={<Icon icon={RotateCw} />}
-                        label="Refresh addons"
-                        onClick={async () => setAddons(await api('/api/addons'))}
-                      />
-                    </HStack>
-
-                    <div className="addons-grid">
-                      {addons.map((a) => (
-                        <div key={a.index} className="addon-status-card">
-                          <div className="addon-card-info">
-                            <span className="addon-card-title">{a.name}</span>
-                            <span className="addon-card-sub">
-                              {a.catalogs?.length || 0} catalogs
-                              {(() => {
-                                const names = (a.resources || [])
-                                  .map((r) => (typeof r === 'string' ? r : r?.name))
-                                  .filter(Boolean);
-                                return names.length ? ` · ${[...new Set(names)].join(', ')}` : '';
-                              })()}
-                            </span>
-                          </div>
-                          <Badge
-                            variant={a.ok ? 'green' : 'red'}
-                            label={a.ok ? 'Connected' : 'Offline'}
-                          />
+                </div>
+                <div className="ls-addons">
+                  {addons.map((addon) => {
+                    const names = (addon.resources || [])
+                      .map((resourceItem) => (typeof resourceItem === 'string' ? resourceItem : resourceItem?.name))
+                      .filter(Boolean);
+                    return (
+                      <div key={addon.index} className="ls-addon">
+                        <div style={{ minWidth: 0 }}>
+                          <b>{addon.name}</b>
+                          <span>
+                            {addon.catalogs?.length || 0} catalogs
+                            {names.length ? ` · ${[...new Set(names)].join(', ')}` : ''}
+                          </span>
                         </div>
-                      ))}
-                    </div>
-                  </VStack>
-            </VStack>
-          </section>
+                        <span className={`ls-status ${addon.ok ? 'is-ok' : 'is-off'}`}>
+                          {addon.ok ? 'Connected' : 'Offline'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
         ) : (
-          /* Browse / Home Route */
-          <VStack gap={0} width="100%">
+          <>
             {featuredItems.length > 0 && (
               <HeroBanner
                 items={featuredItems}
-                item={featuredItems[0]}
-                layout={preferences.layout}
                 onPlay={(target) => openTitle(target, 'auto')}
                 onChooseStream={(target) => openTitle(target, 'choose')}
-                onDetails={(target) => openTitle(target)}
+                onDetails={openTitle}
                 saved={saved}
                 onToggleSave={toggleSave}
               />
             )}
 
-            {/* Category Filter Chip Bar (Nuvio Home filter strip) */}
-            <div className="filter-pills-row" role="group" aria-label="Catalog filter">
-              {[
-                ['all', 'All Catalogs'],
-                ['movies', 'Movies'],
-                ['series', 'Series']
-              ].map(([id, label]) => (
-                <button
-                  type="button"
-                  key={id}
-                  className={`filter-pill ${collectionFilter === id ? 'active' : ''}`}
-                  onClick={() => setCollectionFilter(id)}
+            <div className="ls-shelf" style={{ marginBottom: 'var(--ls-2)' }}>
+              <div className="ls-row-scroll" style={{ gap: 'var(--ls-2)' }}>
+                {[
+                  ['all', 'All'],
+                  ['movies', 'Movies'],
+                  ['series', 'Series']
+                ].map(([id, label]) => (
+                  <Chip key={id} active={collectionFilter === id} onClick={() => setCollectionFilter(id)}>
+                    {label}
+                  </Chip>
+                ))}
+                <Chip
+                  active={preferences.posterShape === 'landscape'}
+                  onClick={() =>
+                    handleApplyPreferences({
+                      ...preferences,
+                      posterShape: preferences.posterShape === 'landscape' ? 'poster' : 'landscape'
+                    })
+                  }
                 >
-                  {label}
-                </button>
-              ))}
-              <button
-                type="button"
-                className={`filter-pill ${preferences.posterShape === 'landscape' ? 'active' : ''}`}
-                onClick={() =>
-                  handleApplyPreferences({
-                    ...preferences,
-                    posterShape: preferences.posterShape === 'landscape' ? 'poster' : 'landscape'
-                  })
-                }
-              >
-                {preferences.posterShape === 'landscape' ? '✓ Widescreen Cards' : 'Widescreen Cards'}
-              </button>
-              <button
-                type="button"
-                className="filter-pill"
-                onClick={() => setShowSettingsModal(true)}
-              >
-                Theme: {activePalette.name}
-              </button>
+                  Widescreen cards
+                </Chip>
+              </div>
             </div>
 
-            {resume.length > 0 && <ContinueWatchingShelf items={resume} onOpen={openTitle} />}
+            {resume.length > 0 && <ContinueWatching items={resume} onOpen={openTitle} />}
 
-            {catalogs.map(({ a, c }, idx) => (
+            {catalogs.map(({ addon, catalog }, index) => (
               <Catalog
-                key={a.index + ':' + c.type + ':' + c.id}
-                addon={a}
-                catalog={c}
-                shape={preferences.posterShape || 'poster'}
-                onOpen={openTitle}
+                key={addon.index + ':' + catalog.type + ':' + catalog.id}
+                addon={addon}
+                catalog={catalog}
                 onViewAll={setExpandedCatalog}
-                onFeaturedItems={idx < 3 ? handleFeaturedItems : undefined}
-                savedIds={savedIds}
-                progressMap={progress}
-                availabilityStore={availabilityStore}
-                onPlay={(target) => openTitle(target, 'auto')}
+                onFeaturedItems={index < 3 ? handleFeaturedItems : undefined}
+                {...shelfProps}
               />
             ))}
-          </VStack>
+          </>
         )}
-      </div>
+      </main>
 
-      {/* Expanded Catalog Full Grid Modal ("See all") */}
+      <nav className="ls-dock-bottom" aria-label="Main">
+        {nav
+          .filter(([id]) => id !== 'appearance')
+          .map(([id, label, Glyph]) => (
+            <a key={id} href={`#${id}`} className={route === id ? 'active' : ''} aria-current={route === id ? 'page' : undefined}>
+              <Glyph size={19} />
+              <span>{label}</span>
+            </a>
+          ))}
+      </nav>
+
       {expandedCatalog && (
-        <Dialog
-          isOpen
-          onOpenChange={(open) => {
-            if (!open) setExpandedCatalog(null);
-          }}
-          width="68rem"
-          maxHeight="90dvh"
-          padding={4}
-        >
-          <DialogHeader
-            title={expandedCatalog.title}
-            onOpenChange={(open) => {
-              if (!open) setExpandedCatalog(null);
-            }}
-          />
-          <div className="dialog-scroll">
+        <Modal open wide onClose={() => setExpandedCatalog(null)} labelledBy="catalog-title">
+          <ModalHeader title={expandedCatalog.title} id="catalog-title" onClose={() => setExpandedCatalog(null)} />
+          <div className="ls-modal-body">
             <Shelf
               title={expandedCatalog.subtitle || 'All titles'}
               items={expandedCatalog.items}
               grid
-              savedIds={savedIds}
-              progressMap={progress}
-              availabilityStore={availabilityStore}
-              onPlay={(target) => {
-                setExpandedCatalog(null);
-                openTitle(target, 'auto');
-              }}
               onOpen={(picked) => {
                 setExpandedCatalog(null);
                 openTitle(picked);
               }}
+              {...shelfProps}
             />
           </div>
-        </Dialog>
+        </Modal>
       )}
 
-      {/* Title Details & Stream Picker Dialog */}
-      {item && (
-        <TitleDialog
-          key={(item.type || 'media') + ':' + item.id}
-          item={item}
-          addons={addons}
-          addonsLoading={addonsLoading}
-          saved={saved}
-          onSave={toggleSave}
-          onPlayStream={startPlayback}
-          autoStart={playbackIntent === 'auto'}
-          initialPicker={playbackIntent === 'choose'}
-          onClose={() => {
-            setItem(null);
-            refreshAvailability();
-          }}
-        />
+      {item && !episode && (
+        <Modal open bare wide onClose={() => setItem(null)} labelledBy="title-page">
+          <div className="ls-modal-body" style={{ padding: 0 }}>
+            <h2 id="title-page" className="ls-visually-hidden" style={{ position: 'absolute', left: -9999 }}>
+              {item.name || item.id}
+            </h2>
+            <TitlePage
+              key={(item.type || 'media') + ':' + item.id}
+              item={item}
+              addons={addons}
+              addonsLoading={addonsLoading}
+              saved={saved}
+              onSave={toggleSave}
+              onPlayStream={startPlayback}
+              autoStart={playbackIntent === 'auto'}
+              initialPicker={playbackIntent === 'choose'}
+              onClose={() => setItem(null)}
+              onEpisode={(entry, options) => {
+                setEpisode(entry);
+                if (options?.play) setPlaybackIntent('auto');
+              }}
+            />
+          </div>
+        </Modal>
       )}
 
-      {/* Appearance Settings Modal */}
-      {showSettingsModal && (
+      {episode && (
+        <Modal open bare wide onClose={() => setEpisode(null)} labelledBy="episode-page">
+          <div className="ls-modal-body" style={{ padding: 0 }}>
+            <h2 id="episode-page" style={{ position: 'absolute', left: -9999 }}>
+              {episode.title || 'Episode'}
+            </h2>
+            <EpisodePage
+              episode={episode}
+              showTitle={item?.name || item?.title || 'Back'}
+              addons={addons}
+              addonsLoading={addonsLoading}
+              autoStart={playbackIntent === 'auto'}
+              initialPicker={playbackIntent === 'choose'}
+              onBack={() => setEpisode(null)}
+              onPlayStream={startPlayback}
+            />
+          </div>
+        </Modal>
+      )}
+
+      {showSettings && (
         <AppearanceSettings
-          isOpen={showSettingsModal}
+          isOpen={showSettings}
           currentPreferences={preferences}
           onApply={handleApplyPreferences}
-          onClose={() => setShowSettingsModal(false)}
+          onClose={() => setShowSettings(false)}
         />
       )}
-    </AppShell>
+    </div>
   );
 }

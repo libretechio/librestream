@@ -148,7 +148,7 @@ export function availabilityFromStreams(streams = []) {
 export function availabilityBadges(availability) {
   if (!availability) return [];
   const badges = [];
-  const top = availability.resolutions[0];
+  const top = (availability.resolutions || [])[0];
   if (top) badges.push(top === '2160p' ? '4K' : top);
   if (availability.dv) badges.push('DV');
   else if (availability.hdr) badges.push('HDR');
@@ -202,8 +202,8 @@ export function rememberAvailability(key, availability) {
     // Merge: certification and the RT score arrive from metadata and must survive.
     store[key] = {
       ...store[key],
-      resolutions: availability.resolutions,
-      languages: availability.languages.slice(0, 8),
+      resolutions: availability.resolutions || [],
+      languages: (availability.languages || []).slice(0, 8),
       cached: availability.cached,
       hdr: availability.hdr,
       dv: availability.dv,

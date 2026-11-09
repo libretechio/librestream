@@ -1,8 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from '@astryxdesign/core/Button';
-import { Icon } from '@astryxdesign/core/Icon';
-import { HStack } from '@astryxdesign/core/HStack';
-import { Heading } from '@astryxdesign/core/Heading';
 import {
   ArrowLeft,
   Play,
@@ -22,6 +18,7 @@ import {
   RectangleHorizontal,
   X
 } from 'lucide-react';
+import { Button, IconButton } from './ui.jsx';
 import { safeURL, readState, writeState } from './api';
 import { fetchSubtitles, mergeSubtitleTracks, languageName } from './subtitles.js';
 import { SubtitleLayer } from './SubtitleLayer.jsx';
@@ -65,7 +62,6 @@ export function Player({
   user,
   addons = [],
   videoId,
-  playerStyle = 'compact',
   onProgress,
   onBack,
   onFailure,
@@ -612,28 +608,19 @@ export function Player({
     setControlsVisible(true);
   };
 
-  const panelTab = (panel, label, Glyph) => (
-    <button
-      type="button"
-      className="ls-tab"
-      aria-pressed={activePanel === panel}
-      onClick={() => openPanel(panel)}
-    >
-      <Glyph size={15} />
-      <span>{label}</span>
-    </button>
-  );
-
   const timelinePointer = (event) => {
     const box = event.currentTarget.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (event.clientX - box.left) / box.width));
     return { ratio, time: ratio * duration };
   };
 
+  const audioLabel = activeAudio >= 0 && audioTracks[activeAudio] ? audioTracks[activeAudio].language : 'Audio';
+  const subLabel = activeSub ? activeSub.language : 'Subs off';
+
   return (
     <div
       ref={containerRef}
-      className={`ls-player ${controlsVisible ? 'is-awake' : 'is-idle'} player-${playerStyle}`}
+      className={`ls-player ${controlsVisible ? 'is-awake' : 'is-idle'}`}
       data-fit={fit}
       onMouseMove={wakeControls}
       onTouchStart={wakeControls}
@@ -651,8 +638,8 @@ export function Player({
           style={{ objectFit: FITS[fit].css, transform: `scale(${zoom})` }}
         >
           {addonTracks
-            .filter(track => safeURL(track.url))
-            .map(track => (
+            .filter((track) => safeURL(track.url))
+            .map((track) => (
               <track
                 key={track.id}
                 id={track.id}
@@ -663,296 +650,186 @@ export function Player({
               />
             ))}
         </video>
-        <SubtitleLayer
-          track={activeTrack}
-          rect={picture}
-          bottomInset={cueInset}
-          scale={SUB_SCALES[subScale]}
-        />
+        <SubtitleLayer track={activeTrack} rect={picture} bottomInset={cueInset} scale={SUB_SCALES[subScale]} />
       </div>
 
       {isBuffering && (
-        <div className="ls-buffering" aria-label="Buffering stream">
+        <div className="ls-buffering" aria-label="Buffering">
           <span className="ls-spinner" />
         </div>
       )}
 
       {doubleTapFeedback && (
-        <div className={`ls-tap ${doubleTapFeedback}`} aria-hidden="true">
+        <div className={`ls-tap-feedback is-${doubleTapFeedback}`} aria-hidden="true">
           {doubleTapFeedback === 'left' ? '−10s' : '+10s'}
         </div>
       )}
 
       {feedback && (
-        <div className="ls-notice" role={needsGesture ? 'status' : 'alert'}>
-          <p className="ls-notice-text">{feedback}</p>
-          <HStack gap={2} vAlign="center">
-            {needsGesture && <Button variant="primary" label="Play" icon={<Icon icon={Play} />} onClick={togglePlay} />}
-            <Button variant="primary" label="Choose stream" icon={<Icon icon={Layers} />} onClick={() => onSwitchSource?.()} />
-            <Button variant="ghost" label="Go back" icon={<Icon icon={ArrowLeft} />} onClick={onBack} />
-          </HStack>
+        <div className="ls-player-notice" role={needsGesture ? 'status' : 'alert'}>
+          <p>{feedback}</p>
+          <div style={{ display: 'flex', gap: 'var(--ls-2)', flexWrap: 'wrap' }}>
+            {needsGesture && <Button variant="primary" size="sm" label="Play" onClick={togglePlay} />}
+            <Button variant="secondary" size="sm" label="Choose stream" onClick={() => onSwitchSource?.()} />
+            <Button variant="ghost" size="sm" label="Go back" onClick={onBack} />
+          </div>
         </div>
       )}
 
-      <header className="ls-top">
-        <button type="button" className="ls-icon" aria-label="Back" onClick={onBack}>
-          <ArrowLeft size={19} />
-        </button>
-        <div className="ls-title-block">
-          <Heading level={3} className="ls-title">
-            {meta.name || meta.title || 'Playing media'}
-          </Heading>
-          <p className="ls-subtitle-line">
-            {meta.playbackTitle || meta.releaseInfo || ''}
-            <span className="ls-source-tag">{sourceName}</span>
-          </p>
+      <header className="ls-player-top">
+        <IconButton icon={<ArrowLeft size={18} />} label="Back" onClick={onBack} />
+        <div className="ls-player-title">
+          <b>{meta.name || meta.title || 'Playing'}</b>
+          <span>
+            {[meta.playbackTitle || meta.releaseInfo, sourceName].filter(Boolean).join(' · ')}
+          </span>
         </div>
-        <div className="ls-top-actions">
-          <button
-            type="button"
-            className="ls-pill"
-            title="Audio and subtitles"
-            onClick={() => openPanel('tracks')}
-          >
-            <Languages size={16} />
-            <span>{activeAudio >= 0 && audioTracks[activeAudio]
-              ? audioTracks[activeAudio].language
-              : 'Audio'}</span>
-            <span className="ls-pill-sep">·</span>
-            <span>{activeSub ? activeSub.language : 'Subs off'}</span>
+        <div className="ls-player-pills">
+          <button type="button" className="ls-pill" onClick={() => openPanel('tracks')}>
+            {audioLabel}
+            <span className="sep">·</span>
+            {subLabel}
           </button>
-          <button
-            type="button"
-            className="ls-pill"
-            title="Sources"
-            onClick={() => onSwitchSource?.()}
-          >
-            <Layers size={16} />
-            <span>{sourceName.length > 22 ? sourceName.slice(0, 22) + '…' : sourceName}</span>
-          </button>
-          <button type="button" className="ls-icon" title="Fullscreen (F)" aria-label="Fullscreen" onClick={toggleFullscreen}>
-            {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+          <button type="button" className="ls-pill" onClick={() => onSwitchSource?.()}>
+            <Layers size={14} />
+            {sourceName.length > 24 ? sourceName.slice(0, 24) + '…' : sourceName}
           </button>
         </div>
       </header>
 
-      {activePanel && (
-        <aside className="ls-sheet" aria-label="Playback settings">
-          <div className="ls-sheet-head">
-            <Heading level={4}>Playback</Heading>
-            <button type="button" className="ls-icon quiet" aria-label="Close settings" onClick={() => setActivePanel(null)}>
-              <X size={16} />
+      {activePanel === 'tracks' && (
+        <div className="ls-popover" style={{ right: 'var(--ls-4)', top: '4.75rem', maxHeight: '60dvh', overflowY: 'auto' }}>
+          <span className="ls-popover-label">Audio</span>
+          <div className="ls-popover-rows">
+            {audioTracks.length === 0 && (
+              <p className="ls-popover-label" style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>
+                Single track
+              </p>
+            )}
+            {audioTracks.map((track) => (
+              <button
+                key={track.index}
+                type="button"
+                className={`ls-popover-row ${activeAudio === track.index ? 'is-active' : ''}`}
+                onClick={() => setActiveAudio(track.index)}
+              >
+                <span>{track.language}</span>
+                {activeAudio === track.index && <Check size={14} />}
+              </button>
+            ))}
+          </div>
+
+          <span className="ls-popover-label">Subtitles</span>
+          <div className="ls-popover-rows">
+            <button
+              type="button"
+              className={`ls-popover-row ${activeSubId === 'off' ? 'is-active' : ''}`}
+              onClick={() => setActiveSubId('off')}
+            >
+              <span>Off</span>
+              {activeSubId === 'off' && <Check size={14} />}
             </button>
+            {subtitleTracks.map((track) => {
+              const key = track.kind === 'addon' ? track.id : `builtin:${track.index}`;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  className={`ls-popover-row ${activeSubId === key ? 'is-active' : ''}`}
+                  onClick={() => setActiveSubId(key)}
+                >
+                  <span>{track.language}</span>
+                  {activeSubId === key && <Check size={14} />}
+                </button>
+              );
+            })}
           </div>
+          {subsLoading && <span className="ls-popover-label">Searching subtitles…</span>}
+          {!subsLoading && subsNotice && (
+            <span className="ls-popover-label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+              {subsNotice}
+            </span>
+          )}
 
-          <div className="ls-tabs" role="tablist">
-            {panelTab('tracks', 'Tracks', Languages)}
-            {panelTab('picture', 'Picture', RectangleHorizontal)}
-            {panelTab('speed', 'Speed', Gauge)}
+          <span className="ls-popover-label">Subtitle size</span>
+          <div className="ls-popover-seg">
+            {Object.keys(SUB_SCALES).map((size) => (
+              <button
+                key={size}
+                type="button"
+                className={subScale === size ? 'is-active' : ''}
+                onClick={() => setSubScale(size)}
+              >
+                {size}
+              </button>
+            ))}
           </div>
-
-          <div className="ls-sheet-body">
-            {activePanel === 'tracks' && (
-              <>
-                <section className="ls-group">
-                  <h5 className="ls-group-label">Audio</h5>
-                  {audioTracks.length === 0 && (
-                    <p className="ls-note">
-                      Single audio track. Browsers cannot switch audio inside MP4 or MKV files.
-                    </p>
-                  )}
-                  {audioTracks.map(track => (
-                    <button
-                      key={track.index}
-                      type="button"
-                      className={`ls-row ${activeAudio === track.index ? 'is-active' : ''}`}
-                      onClick={() => setActiveAudio(track.index)}
-                    >
-                      <span className="ls-row-main">
-                        <span className="ls-row-title">{track.language}</span>
-                        <span className="ls-row-sub">{track.label}</span>
-                      </span>
-                      {activeAudio === track.index && <Check size={15} className="ls-check" />}
-                    </button>
-                  ))}
-                </section>
-
-                <section className="ls-group">
-                  <h5 className="ls-group-label">Subtitles</h5>
-                  <button
-                    type="button"
-                    className={`ls-row ${activeSubId === 'off' ? 'is-active' : ''}`}
-                    onClick={() => setActiveSubId('off')}
-                  >
-                    <span className="ls-row-main"><span className="ls-row-title">Off</span></span>
-                    {activeSubId === 'off' && <Check size={15} className="ls-check" />}
-                  </button>
-                  {subtitleTracks.map(track => {
-                    const key = track.kind === 'addon' ? track.id : `builtin:${track.index}`;
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        className={`ls-row ${activeSubId === key ? 'is-active' : ''}`}
-                        onClick={() => setActiveSubId(key)}
-                      >
-                        <span className="ls-row-main">
-                          <span className="ls-row-title">{track.language}</span>
-                          <span className="ls-row-sub">{track.kind === 'addon' ? track.addon : 'Embedded'}</span>
-                        </span>
-                        {activeSubId === key && <Check size={15} className="ls-check" />}
-                      </button>
-                    );
-                  })}
-                  {subsLoading && <p className="ls-note">Searching subtitle addons…</p>}
-                  {!subsLoading && subsNotice && <p className="ls-note">{subsNotice}</p>}
-
-                  <div className="ls-field">
-                    <span className="ls-field-label">Size</span>
-                    <div className="ls-segmented" role="group" aria-label="Subtitle size">
-                      {Object.keys(SUB_SCALES).map(size => (
-                        <button
-                          key={size}
-                          type="button"
-                          className={subScale === size ? 'is-active' : ''}
-                          aria-pressed={subScale === size}
-                          onClick={() => setSubScale(size)}
-                        >
-                          {size}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="ls-field">
-                    <span className="ls-field-label">Height</span>
-                    <div className="ls-segmented" role="group" aria-label="Subtitle height">
-                      {Object.keys(SUB_OFFSETS).map(position => (
-                        <button
-                          key={position}
-                          type="button"
-                          className={subOffset === position ? 'is-active' : ''}
-                          aria-pressed={subOffset === position}
-                          onClick={() => setSubOffset(position)}
-                        >
-                          {position}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </section>
-              </>
-            )}
-
-            {activePanel === 'picture' && (
-              <>
-                <section className="ls-group">
-                  <h5 className="ls-group-label">Aspect</h5>
-                  {Object.entries(FITS).map(([key, value]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      className={`ls-row ${fit === key ? 'is-active' : ''}`}
-                      onClick={() => setFit(key)}
-                    >
-                      <span className="ls-row-main">
-                        <span className="ls-row-title">{value.label}</span>
-                        <span className="ls-row-sub">{value.hint}</span>
-                      </span>
-                      {fit === key && <Check size={15} className="ls-check" />}
-                    </button>
-                  ))}
-                  <div className="ls-field">
-                    <span className="ls-field-label">Zoom</span>
-                    <div className="ls-segmented" role="group" aria-label="Picture zoom">
-                      {ZOOMS.map(value => (
-                        <button
-                          key={value}
-                          type="button"
-                          className={zoom === value ? 'is-active' : ''}
-                          aria-pressed={zoom === value}
-                          onClick={() => setZoom(value)}
-                        >
-                          {Math.round(value * 100)}%
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </section>
-
-                <section className="ls-group">
-                  <h5 className="ls-group-label">Quality</h5>
-                  {!levels.length && (
-                    <p className="ls-note">Single file. Quality comes from the stream you picked.</p>
-                  )}
-                  {levels.length > 0 && (
-                    <>
-                      <button
-                        type="button"
-                        className={`ls-row ${activeLevel === -1 ? 'is-active' : ''}`}
-                        onClick={() => chooseLevel(-1)}
-                      >
-                        <span className="ls-row-main">
-                          <span className="ls-row-title">Auto</span>
-                          <span className="ls-row-sub">Follows bandwidth</span>
-                        </span>
-                        {activeLevel === -1 && <Check size={15} className="ls-check" />}
-                      </button>
-                      {[...levels].reverse().map(level => (
-                        <button
-                          key={level.index}
-                          type="button"
-                          className={`ls-row ${activeLevel === level.index ? 'is-active' : ''}`}
-                          onClick={() => chooseLevel(level.index)}
-                        >
-                          <span className="ls-row-main">
-                            <span className="ls-row-title">
-                              {level.height ? `${level.height}p` : `${Math.round(level.bitrate / 1000)} kbps`}
-                            </span>
-                            <span className="ls-row-sub">{Math.round(level.bitrate / 1000)} kbps</span>
-                          </span>
-                          {activeLevel === level.index && <Check size={15} className="ls-check" />}
-                        </button>
-                      ))}
-                    </>
-                  )}
-                </section>
-              </>
-            )}
-
-            {activePanel === 'speed' && (
-              <section className="ls-group">
-                <h5 className="ls-group-label">Speed</h5>
-                {SPEEDS.map(speed => (
-                  <button
-                    key={speed}
-                    type="button"
-                    className={`ls-row ${playbackSpeed === speed ? 'is-active' : ''}`}
-                    onClick={() => changeSpeed(speed)}
-                  >
-                    <span className="ls-row-main">
-                      <span className="ls-row-title">{speed}×</span>
-                      {speed === 1 && <span className="ls-row-sub">Normal</span>}
-                    </span>
-                    {playbackSpeed === speed && <Check size={15} className="ls-check" />}
-                  </button>
-                ))}
-              </section>
-            )}
-          </div>
-        </aside>
+        </div>
       )}
 
-      <div className="ls-chrome" ref={chromeRef}>
+      {activePanel === 'picture' && (
+        <div className="ls-popover is-picture">
+          <span className="ls-popover-label">Aspect</span>
+          <div className="ls-popover-rows">
+            {Object.entries(FITS).map(([key, value]) => (
+              <button
+                key={key}
+                type="button"
+                className={`ls-popover-row ${fit === key ? 'is-active' : ''}`}
+                onClick={() => setFit(key)}
+              >
+                <span>{value.label}</span>
+                {fit === key && <Check size={14} />}
+              </button>
+            ))}
+          </div>
+          <span className="ls-popover-label">Zoom</span>
+          <div className="ls-popover-seg">
+            {ZOOMS.map((value) => (
+              <button
+                key={value}
+                type="button"
+                className={zoom === value ? 'is-active' : ''}
+                onClick={() => setZoom(value)}
+              >
+                {Math.round(value * 100)}%
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {activePanel === 'speed' && (
+        <div className="ls-popover is-picture">
+          <span className="ls-popover-label">Speed</span>
+          <div className="ls-popover-rows">
+            {SPEEDS.map((speed) => (
+              <button
+                key={speed}
+                type="button"
+                className={`ls-popover-row ${playbackSpeed === speed ? 'is-active' : ''}`}
+                onClick={() => changeSpeed(speed)}
+              >
+                <span>{speed}×</span>
+                {playbackSpeed === speed && <Check size={14} />}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="ls-player-deck" ref={chromeRef}>
         <div
           className="ls-timeline"
-          onPointerMove={(e) => { if (duration) setScrub(timelinePointer(e)); }}
+          onPointerMove={(event) => {
+            if (duration) setScrub(timelinePointer(event));
+          }}
           onPointerLeave={() => setScrub(null)}
         >
           <div className="ls-timeline-track">
-            <div className="ls-timeline-buffered" style={{ width: `${bufferedPct}%` }} />
+            <div className="ls-timeline-buffer" style={{ width: `${bufferedPct}%` }} />
             <div className="ls-timeline-played" style={{ width: `${played}%` }} />
-            <div className="ls-timeline-head" style={{ left: `${played}%` }} />
-            {scrub && <div className="ls-timeline-scrub" style={{ left: `${scrub.ratio * 100}%` }} />}
+            <div className="ls-timeline-knob" style={{ left: `${played}%` }} />
           </div>
           {scrub && (
             <span className="ls-scrub-bubble" style={{ left: `${scrub.ratio * 100}%` }}>
@@ -966,7 +843,7 @@ export function Player({
             max={duration || 100}
             step={0.1}
             value={currentTime}
-            onChange={(e) => seek(Number(e.target.value))}
+            onChange={(event) => seek(Number(event.target.value))}
             aria-label="Seek"
           />
         </div>
@@ -974,33 +851,30 @@ export function Player({
         <div className="ls-transport">
           <button
             type="button"
-            className="ls-play"
+            className="ls-play-btn"
             aria-label={isPlaying ? 'Pause' : 'Play'}
-            title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
             onClick={togglePlay}
           >
-            {isPlaying ? <Pause size={20} /> : <Play size={20} />}
+            {isPlaying ? <Pause size={17} /> : <Play size={17} fill="currentColor" strokeWidth={0} />}
           </button>
-          <button type="button" className="ls-icon" title="Rewind 10s (←)" aria-label="Rewind 10 seconds" onClick={() => skip(-10)}>
-            <RotateCcw size={17} />
+          <button type="button" className="ls-chrome-btn" aria-label="Rewind 10 seconds" onClick={() => skip(-10)}>
+            <RotateCcw size={16} />
           </button>
-          <button type="button" className="ls-icon" title="Forward 10s (→)" aria-label="Forward 10 seconds" onClick={() => skip(10)}>
-            <RotateCw size={17} />
+          <button type="button" className="ls-chrome-btn" aria-label="Forward 10 seconds" onClick={() => skip(10)}>
+            <RotateCw size={16} />
           </button>
 
-          <span className="ls-clock">
-            <span className="ls-clock-now">{formatTime(currentTime)}</span>
-            <span className="ls-clock-sep">/</span>
-            <span className="ls-clock-total">{formatTime(duration)}</span>
+          <span className="ls-timecode">
+            {formatTime(currentTime)}
+            <em>/ {formatTime(duration)}</em>
           </span>
 
-          <div className="ls-spacer" />
+          <div className="ls-transport-spacer" />
 
           <div className="ls-volume">
             <button
               type="button"
-              className="ls-icon"
-              title="Mute (M)"
+              className="ls-chrome-btn"
               aria-label="Mute"
               onClick={() => {
                 const video = videoRef.current;
@@ -1010,7 +884,7 @@ export function Player({
                 }
               }}
             >
-              {isMuted || volume === 0 ? <VolumeX size={17} /> : <Volume2 size={17} />}
+              {isMuted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
             </button>
             <input
               type="range"
@@ -1019,11 +893,11 @@ export function Player({
               max={1}
               step={0.05}
               value={isMuted ? 0 : volume}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                setVolume(v);
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                setVolume(next);
                 if (videoRef.current) {
-                  videoRef.current.volume = v;
+                  videoRef.current.volume = next;
                   videoRef.current.muted = false;
                   setIsMuted(false);
                 }
@@ -1034,46 +908,36 @@ export function Player({
 
           <button
             type="button"
-            className={`ls-icon ${audioTracks.length > 1 ? 'has-count' : ''}`}
-            title="Audio tracks"
-            aria-label="Audio tracks"
+            className={`ls-chrome-btn ${activeSub ? 'is-on' : ''}`}
+            aria-label="Audio and subtitles"
+            title="Audio and subtitles (C)"
             onClick={() => openPanel('tracks')}
           >
-            <Languages size={17} />
-            {audioTracks.length > 1 && <span className="ls-count">{audioTracks.length}</span>}
+            <Subtitles size={16} />
           </button>
           <button
             type="button"
-            className={`ls-icon ${activeSub ? 'is-on' : ''}`}
-            title="Subtitles (C)"
-            aria-label="Subtitles"
-            onClick={() => openPanel('tracks')}
-          >
-            <Subtitles size={17} />
-          </button>
-          <button
-            type="button"
-            className="ls-icon"
-            title={`Aspect: ${FITS[fit].label} (A)`}
+            className={`ls-chrome-btn ${activePanel === 'picture' ? 'is-on' : ''}`}
             aria-label={`Aspect ratio: ${FITS[fit].label}`}
+            title={`Aspect: ${FITS[fit].label} (A)`}
             onClick={() => openPanel('picture')}
           >
-            <RectangleHorizontal size={17} />
+            <RectangleHorizontal size={16} />
           </button>
           <button
             type="button"
-            className="ls-icon ls-speed"
-            title="Playback speed"
+            className="ls-chrome-btn"
             aria-label="Playback speed"
+            title="Playback speed"
             onClick={() => openPanel('speed')}
           >
             {playbackSpeed}×
           </button>
-          <button type="button" className="ls-icon" title="Picture in picture" aria-label="Picture in picture" onClick={togglePiP}>
-            <PictureInPicture size={17} />
+          <button type="button" className="ls-chrome-btn" aria-label="Picture in picture" onClick={togglePiP}>
+            <PictureInPicture size={16} />
           </button>
-          <button type="button" className="ls-icon" title="Fullscreen (F)" aria-label="Fullscreen" onClick={toggleFullscreen}>
-            {isFullscreen ? <Minimize size={17} /> : <Maximize size={17} />}
+          <button type="button" className="ls-chrome-btn" aria-label="Fullscreen" onClick={toggleFullscreen}>
+            {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
           </button>
         </div>
       </div>

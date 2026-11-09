@@ -1,35 +1,38 @@
-# AGENTS.md
+# AGENTS.md — LibreStream browser client
 
-Project-specific guidance for AI coding agents.
+Project guidance for coding agents.
 
-<!-- ASTRYX:START -->
-Astryx v0.7.11 · 174 components
-CLI: run every command as `npx astryx <cmd>` (shown below as `astryx ...`).
+## Stack
+React 19 + Vite. No component library. Every control is a native element with the
+app's own styles, so focus, keyboard and semantics come from the browser.
 
-SETUP (once, in app entry e.g. main.tsx) — without these, components render unstyled:
-  import "@astryxdesign/core/reset.css";
-  import "@astryxdesign/core/astryx.css";
+- `web/ui.jsx` — the primitives: Button, IconButton, Badge, Chip, Field, Select,
+  Segmented, Modal, ModalHeader, Skeleton, Spinner. Add new controls here.
+- `web/tokens.css` — the only place sizes are decided (space, radius, type, glass).
+- `web/palettes.css` — palette values; `web/palettes.js` — palette + font presets and
+  the DOM writer that applies them.
+- `web/browser.css` — component styles, built from the tokens.
+- `web/badges.js` — everything that derives display data from addon metadata or
+  stream text. Pure functions, unit tested.
+- `web/Player.jsx`, `web/SubtitleLayer.jsx`, `web/picture.js` — playback and the
+  picture-rect maths that keeps subtitles inside the video.
+- `server.mjs` — the gateway: addon proxy, playback proxy, subtitle proxy.
 
-WORKFLOW — start every page from a template, never from scratch:
-1. `astryx build "<idea>"` — names the template to scaffold from and the parts it lacks.
-2. `astryx template <name> <path>` — scaffold it; keep its frame, gap and padding; replace the content.
-3. `astryx template <Block>` for parts it lacks; `astryx component <Name>` to read props before using one.
-Changing an existing page? Keep it: skip step 2 and add blocks/components inside its sections.
-Before you deliver a build, run `astryx doctor --built <dir>`; don't deliver it if it fails.
+## Rules
+- Colours, spacing and radii come from tokens. No raw hex in component CSS; no
+  `px` for anything that should scale.
+- `html` stays at the browser default font size: every token is in `rem`.
+- Actions are white. Mint (`--ls-cached`) means "cached" and nothing else.
+- Glass is for floating chrome (docks, modals, player deck, chips over artwork).
+  Body surfaces are solid.
+- Poster card: ratings and age certification inside the artwork; quality,
+  language count, size, cached in the strip below.
+- Never invent metadata. If a provider does not send a rating, the badge does not
+  render. See `badges.js`.
+- Playback and subtitle URLs stay behind gateway handles; never expose provider
+  URLs or tokens to the client.
 
-RULES:
-- No <div> — components handle all layout and spacing.
-- Read `astryx docs layout` before changing a template's frame.
-- Dense data = rows (Table, List/Item), not Card-wrapped lists. Badge = counts only.
-- Style with component props first, then tokens (var(--color-*|--spacing-*|--radius-*)). No raw hex/px. No StyleX/Tailwind compiler here — don't use xstyle/utility classes directly. Some templates use StyleX and need a compiler plugin; see `astryx docs styling-overview`.
-- Palettes and custom colors go through the theme, never :root overrides. Run `astryx theme add <slug>` to import; `theme eject <slug>` only forks source. See `astryx docs theme`.
-- SELF-CHECK: re-read the file; replace any raw <div>/<span>, imported .css/@apply, or hardcoded #hex/px with the component or a token.
-
-`astryx help` lists every command. Key ones beyond the workflow:
-  search "<query>"   find any component / hook / doc / template
-  discover <words>   integrations you could add
-  docs <topic>       getting-started, principles, tokens, theme … (`astryx docs` lists all)
-  docs cli           commands and API reference
-  docs authoring     build an integration package, and every field it holds
-  upgrade --from <old version> --apply   run after a dependency bump
-<!-- ASTRYX:END -->
+## Checks before delivering
+- `npm run build`
+- `npm test` (66 tests)
+- `node tests/player-preview.mjs` for a local player fixture on :4178

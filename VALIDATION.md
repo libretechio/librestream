@@ -1,5 +1,43 @@
 # LibreStream validation
 
+## Overhaul: Astryx removed, Warm Graphite glass (2026-11-09, local only)
+
+Six decisions were taken from rendered mockups before any app code changed (mockups in `mockups/`: directions.png, header.png, posters.png, detail3.png, episodes.png, player3.png).
+
+| Decision | Chosen |
+|---|---|
+| Surface | C — Warm Graphite, maximum glass |
+| Header | N2 — floating glass dock, inset |
+| Phone nav | floating glass dock at the bottom |
+| Poster card | P1 for shelves, P3 widescreen for Continue watching; hover scale 1.03 + white play |
+| Title panel | D3 full takeover (desktop and phone); stream list only behind Choose stream; stream rows carry provider + size on a second line |
+| Episodes | season rows have their own Play; Choose stream only on the episode takeover |
+| Movie actions | pinned in the hero |
+| Player | V1 floating deck; aspect button opens Fit/Fill/Stretch + zoom popover |
+
+Astryx is gone: 8 packages removed, `web/themes/` deleted, every component replaced by the app's own primitives in `web/ui.jsx`. Bundle went from 1,059 kB JS / 449 kB CSS to 308 kB / 52 kB.
+
+Bugs found by driving the UI (not by the build):
+- `availabilityBadges` read `resolutions[0]` on stored entries that only carried a certification → blank page. Now tolerant of partial entries.
+- Play on a movie, and Play on an episode, never mounted the stream list, so auto-selection could not start. Both now open it.
+- `html { font-size: 14px }` shrank every rem-based token (44px buttons rendered 39px, 14px text rendered 12.25px). Root is back to 16px.
+
+Measured (Chromium, local preview, real addons)
+- Palette graphite, dock `blur(40px) saturate(1.9)`, poster radius 14px, 96 posters, 0 horizontal overflow at 1440 and 390.
+- Contrast: title 17.29, card metadata 6.17, hero synopsis 7.71, strip chips 17.29.
+- Targets: nothing under 24px at either width; phone dock 53px tall, 39–44px rows.
+- Title takeover: Play / Choose stream / Watchlist; stream list 493 rows with provider and size; series shows 10 episode rows each with Play and no Choose stream; episode page has Play + Choose stream and 21 rows.
+- Player: deck 18px radius, `blur(40px)`, white play, timecode, pills `Audio · Subs off` / `Fixture 360p`; aspect popover lists Fit/Fill/Stretch and 100–150% zoom.
+- Fixture playback: player opens, video element present, subtitle track attached.
+- Build and 66 tests pass.
+
+Not verified
+- Human visual review; every check is geometry, computed style and contrast.
+- Real AIOStreams playback: sampled links still fail the probe (pre-existing provider condition), so the ranking reports "Checking source n of 4" and falls back to the list.
+- Rotten Tomatoes badges: no addon supplies a score, so they do not render.
+- Safari and iOS.
+- Production. Nothing pushed, merged or deployed.
+
 ## Hero: side poster removed (2026-11-09, local only)
 
 The hero showed the same title twice — widescreen backdrop plus a portrait poster card on the right. The card is gone; the hero is one artwork with copy on the scrim. Removed `.hero-SidePoster` and `.hero-side-poster-img` from `HeroBanner.jsx` and `browser.css`, including the 48rem rule that revealed it.
