@@ -1,5 +1,252 @@
 # LibreStream validation
 
+## Fix round: hero paging, seasons, instant Play (2026-11-09, local only)
+
+Reported, then reproduced in the browser before changing anything:
+
+1. **No right arrow on the hero.** At 390px the pager had 350px, but 8 dots (288px) plus two arrows (80px) needed 394px, so the right arrow sat at x=378–414 — outside the viewport. The dots strip now shrinks and scrolls; arrows are `flex: 0 0 auto`. Measured after: arrows at 294–330 and 334–370, both inside 390.
+2. **No swipe on the hero.** Added a horizontal swipe handler (48px threshold, must beat vertical movement by 1.4x) plus Left/Right arrow keys. Verified: swipe moved slide 0 → 1.
+3. **Widescreen-cards chip** removed from the home filter strip.
+4. **Ship logo missing.** `BrandMark` existed but the dock rendered a letter tile. The ship SVG is back in the dock.
+5. **Many seasons broke the layout.** Season chips now wrap inside the section title row. Measured with 7 chips at 390px: 2 rows, right edge 353, no overflow.
+6. **Play must play immediately.** Added `web/connection.js`: one connection measurement per session at start-up (best of 3 pings + a 256 KB `/api/ping` sample), cached 30 minutes. Streams are fetched and ranked per title when it is opened — the first episode of the visible season for series — and reused. Play consumes that ranking; it never probes, never opens the list. Measured: movie Play → player in 156 ms, episode Play in 141 ms, zero stream rows rendered.
+7. **Stream options only behind Choose stream.** The list is gated on an explicit pick; pressing Play after opening it closes it again.
+
+Bugs found while doing this (all real, all fixed):
+- Sources fetched every provider a second time on top of the warm fetch (14 duplicate requests). It now reuses `warmTitle`, so a title costs one round of requests.
+- Warmed rows carried `info: null`, which crashed the list renderer.
+- `rankingKey` built `movie:` for episodes because episode objects have no `type`, so the warm ranking was never found.
+- The Play wait loop read `pending` from a stale closure and gave up immediately.
+- A `useEffect` referencing `activeSeason` above its declaration threw a temporal-dead-zone error and blanked the title page.
+
+Antislop / hygiene pass:
+- Minimum type size raised to 12px everywhere (was 11px). Contrast re-measured: 17.29 titles, 6.17 card metadata, 7.71 synopsis.
+- Modal now traps Tab and restores focus to the previously focused element.
+- Static inline styles replaced with utility classes; duplicate `.ls-visually-hidden` removed.
+- Dead code deleted: `web/autoSelect.js` and its four test files (superseded by `connection.js`), plus unused exports `sourceLabel`, `parseStreamMeta` and five unused icons.
+- 165 CSS classes, 0 dead. `!important` appears only in the reduced-motion block.
+
+State: 54 tests pass, build passes, no console errors across home, title, streams, seasons and player.
+
+Not verified: human visual review, Safari/iOS, real AIOStreams playback (provider links still fail the probe), Rotten Tomatoes badges (no addon supplies a score), production.
+
+## Overhaul: Astryx removed, Warm Graphite glass (2026-11-09, local only)
+
+Six decisions were taken from rendered mockups before any app code changed (mockups in `mockups/`: directions.png, header.png, posters.png, detail3.png, episodes.png, player3.png).
+
+| Decision | Chosen |
+|---|---|
+| Surface | C — Warm Graphite, maximum glass |
+| Header | N2 — floating glass dock, inset |
+| Phone nav | floating glass dock at the bottom |
+| Poster card | P1 for shelves, P3 widescreen for Continue watching; hover scale 1.03 + white play |
+| Title panel | D3 full takeover (desktop and phone); stream list only behind Choose stream; stream rows carry provider + size on a second line |
+| Episodes | season rows have their own Play; Choose stream only on the episode takeover |
+| Movie actions | pinned in the hero |
+| Player | V1 floating deck; aspect button opens Fit/Fill/Stretch + zoom popover |
+
+Astryx is gone: 8 packages removed, `web/themes/` deleted, every component replaced by the app's own primitives in `web/ui.jsx`. Bundle went from 1,059 kB JS / 449 kB CSS to 308 kB / 52 kB.
+
+Bugs found by driving the UI (not by the build):
+- `availabilityBadges` read `resolutions[0]` on stored entries that only carried a certification → blank page. Now tolerant of partial entries.
+- Play on a movie, and Play on an episode, never mounted the stream list, so auto-selection could not start. Both now open it.
+- `html { font-size: 14px }` shrank every rem-based token (44px buttons rendered 39px, 14px text rendered 12.25px). Root is back to 16px.
+
+Measured (Chromium, local preview, real addons)
+- Palette graphite, dock `blur(40px) saturate(1.9)`, poster radius 14px, 96 posters, 0 horizontal overflow at 1440 and 390.
+- Contrast: title 17.29, card metadata 6.17, hero synopsis 7.71, strip chips 17.29.
+- Targets: nothing under 24px at either width; phone dock 53px tall, 39–44px rows.
+- Title takeover: Play / Choose stream / Watchlist; stream list 493 rows with provider and size; series shows 10 episode rows each with Play and no Choose stream; episode page has Play + Choose stream and 21 rows.
+- Player: deck 18px radius, `blur(40px)`, white play, timecode, pills `Audio · Subs off` / `Fixture 360p`; aspect popover lists Fit/Fill/Stretch and 100–150% zoom.
+- Fixture playback: player opens, video element present, subtitle track attached.
+- Build and 66 tests pass.
+
+Not verified
+- Human visual review; every check is geometry, computed style and contrast.
+- Real AIOStreams playback: sampled links still fail the probe (pre-existing provider condition), so the ranking reports "Checking source n of 4" and falls back to the list.
+- Rotten Tomatoes badges: no addon supplies a score, so they do not render.
+- Safari and iOS.
+- Production. Nothing pushed, merged or deployed.
+
+## Hero: side poster removed (2026-11-09, local only)
+
+The hero showed the same title twice — widescreen backdrop plus a portrait poster card on the right. The card is gone; the hero is one artwork with copy on the scrim. Removed `.hero-SidePoster` and `.hero-side-poster-img` from `HeroBanner.jsx` and `browser.css`, including the 48rem rule that revealed it.
+
+Measured at 1440, 1024 and 390px: 0 side posters, exactly 1 image in the hero, 4 CTAs, no horizontal overflow. Hero height 432px desktop/tablet, 411px phone. Build and 66 tests pass.
+
+## Frosted glass pass + poster information split (2026-11-09, local only)
+
+Reference: a Google Stitch mockup the user liked (Apple TV+ / Infuse frosted glass), used as a style reference for existing components only. Nothing was copied wholesale.
+
+Poster information, as directed:
+- Inside the artwork: IMDb rating, Rotten Tomatoes score, age certification. Nothing else.
+- Under the artwork (the strip): quality flags (4K / DV / HDR / Atmos / REMUX), language count, file size, cached, new, saved.
+- Rotten Tomatoes: **no configured addon supplies an RT score.** The RT addon's catalog entries carry only id/name/poster/description, and its meta endpoint returns 502 here. The badge renders only when a real score arrives (`rtRating`, `tomatoMeter`, `rottenTomatoes` or `app_extras.*`), so it is hidden today rather than faked.
+- Age certification: Cinemeta does not send one; Xperience sends `app_extras.certification`. Metadata from all meta-capable addons is now merged instead of first-wins, so certification is found. It is remembered per title, so the poster shows `R` after the title has been opened once.
+
+Frosted glass, applied to existing elements:
+- Surfaces neutralised to near-black (`#0b0b0d` / `#0f0f12` / `#18181c`); the Oxblood accent `#c0524a` is kept.
+- Header: fixed, gradient-to-transparent, `backdrop-filter: blur(20px)`, plain text navigation with no pill, circular ghost buttons, white brand tile.
+- Hero: two-gradient vignette, frosted meta chips, white solid primary CTA + frosted secondary, 12px radii.
+- Posters: 12px radius, 1px white/6% hairline, hover scale 1.03 with a deep shadow (no accent border), frosted rating chips, white circular play on hover.
+- Dialogs and stream rows: frosted panels (`blur(28px) saturate(180%)`), 16px radius, stream rows as individual glass cards with white circular play on hover.
+- Player: floating frosted deck (`blur(40px)`, 16px radius), white circular play, thin white scrubber with a hover thumb, glass pills for audio/subtitles and sources in the top bar.
+- Continue watching: glass cards, white progress bar, resume-time chip on the artwork.
+
+Bug found and fixed while driving the UI: on the desktop two-column title panel the Sources action row is hidden, so "Choose stream" opened nothing. `Sources` now accepts an `openPicker` signal from the parent.
+
+Measured (Chromium, local preview, real addons)
+- Header blur active; hero CTA `rgb(255,255,255)`; poster radius 12px with `rgba(255,255,255,0.06)` border; rating chips `blur(12px)`; dialog `blur(28px)` at 16px radius; player deck `blur(40px)`, 16px radius, white play, 8px inner icon radius.
+- Poster for a read title: `R` top-right, `★ 7.8` top-left, strip `4K · DV · Atmos · REMUX · 8 lang · 72 GB · cached`.
+- Desktop stream picker: 493 rows from PenguPlay/AIOStreams; no overflow at 1425 or 375 px.
+- Build and 66 tests pass.
+
+Not verified
+- Human visual review; every check here is geometry and computed style.
+- Rotten Tomatoes scores, because no addon provides them.
+- Safari and iOS.
+- Production. Nothing pushed, merged or deployed.
+
+## Round 5 — strip prefetch, player alignment, resume cards (2026-11-09, local only)
+
+Chosen by the user: prefetch the first visible titles, align the player to the approved system, and show resume time on continue-watching artwork.
+
+- `web/badges.js`: `titlesNeedingAvailability` and `prefetchAvailability`. Bounded to 12 titles, concurrency 2, one AbortController for the page lifetime, skipped titles already in the store. 3 unit tests.
+- `web/App.jsx`: prefetch effect keyed on the featured items, plus a resume-time label on continue-watching cards.
+- `web/browser.css`: player chrome now takes the Oxblood accent, 8px control radius, Figtree titles and JetBrains Sans timecodes; continue cards are 16:9 with a resume chip and progress bar.
+
+Measured: poster strips on the home route went from 3 to 9 within ~20s of load, with 8 titles in the availability store. Sample strips: `4K · DV · Atmos · 8 lang · cached`, `4K · HDR`. Player opened and played; play control is Oxblood `rgb(192,82,74)`, clock font JetBrains Sans. Build and 63 tests pass.
+
+## Approved design pass — Oxblood (2026-11-09, local only)
+
+Ten decisions were taken from the user, each from a rendered mockup, before any app code changed. Mockups live in `mockups/` next to this file.
+
+| Decision | Chosen |
+|---|---|
+| Direction | A — Editorial Cinema (artwork first, quiet chrome) |
+| Poster info | Corners for certification and rating; data strip under the artwork for quality, language count, cache |
+| Typography | Figtree for titles and UI, JetBrains Sans for numerals and badges |
+| Palette | Oxblood — `#c0524a` on `#120d0d` |
+| Shape | S2 Soft — 10px artwork, 8px controls, 4px badges, one soft shadow |
+| Hero | H1 full-bleed |
+| Title panel | D2 two-column on desktop, D3 tabbed on phone |
+| Poster strip | Quality + language count + cached |
+| Hover | Lift 2px, accent border, artwork zooms 3%, reveals Play and the trimmed badges |
+| Phone navigation | Bottom bar with a filled active pill |
+
+Implemented
+- `web/palettes.js`: Oxblood palette added and made the default; new `oxblood` font preset carrying a `numeric` face, exposed as `--font-family-num`; `DEFAULT_PREFERENCES` point at both.
+- `web/palettes.css`: Oxblood token block so the palette applies before JS runs.
+- `web/tokens.css`: radius scale is now 4 / 8 / 10 / 12, plus `--ls-num` and a single elevation pair.
+- `web/badges.js` (new, 9 unit tests): runtime parsing, New badge from a real release date only, episode counts, awards, certification, language extraction from provider flags, and `availabilityFromStreams` for quality/HDR/DV/Atmos/REMUX/cache/languages.
+- Poster card: certification + New top-left, rating top-right, progress bar, and a caption carrying title, `year · type · runtime` and the data strip. Hover reveals Play and the badges trimmed from the strip. Touch devices always show Play.
+- Availability is remembered per title in `localStorage` after its streams load, so the strip fills in without extra requests. No language or quality is invented: an unopened title shows only what its catalogue entry actually contains.
+- Title panel: `useMediaQuery` picks D2 (poster column + facts + actions + episodes + sources) or D3 (banner, actions, Episodes/Overview/Streams tabs).
+- Phone navigation: filled accent pill behind the active icon.
+
+Fixed on the way: the app crashed to a blank page twice during this pass (`useMemo is not defined`, then `ScrollRow is not defined`) after two of my edits removed or failed to import symbols. Both were caught by reading the console, not by the build, which had passed.
+
+Measured in the browser (Chromium, local preview, real addons)
+- Palette `oxblood`, heading font Figtree, numerals JetBrains Sans, artwork radius 10px, shadow present.
+- 96 poster cards on the home route; each has a hover Play control; strip renders `4K · DV · Atmos · 8 lang · cached` for a title whose streams had been read, with 3 more badges behind hover.
+- Contrast on Oxblood: poster title 14.7, poster sub 7.59, quality chip 19.28, shelf heading 16.66, hero synopsis 8.12.
+- Desktop title panel: two columns (184px poster + content), Play / Choose stream / Watchlist, no duplicated action row.
+- Phone title panel: tabbed layout, actions above the tabs.
+- Build and 60 tests pass.
+
+Not verified
+- Human visual review. I cannot see images, so every check here is geometry, computed style and contrast; the mockups were rendered and measured, not looked at.
+- Safari and iOS.
+- Production. Nothing pushed, merged or deployed for this pass.
+
+## Interface system pass (2026-11-09, local only)
+
+Scope: the whole interface, not only the player. Header, navigation, hero, shelves, posters, continue watching, title dialog, episodes, sources, appearance and settings were rebuilt on one token layer.
+
+What changed
+- `web/tokens.css` (new) defines the only sizes used: 4px spacing grid, four radii (4/6/8/12), seven type steps, four surface levels, hairline borders, one accent, focus ring. Every value derives from the palette variables, so a palette swap restyles the app.
+- `web/browser.css` was rewritten around that layer. Removed: 15 pill radii (9999px), the ambient blurred hero backdrop, the second hero scrim, the poster gradient scrim on every card, hover translate/scale, card drop shadows, and the decorative app-shell glow.
+- Shelves no longer use the Astryx Carousel: its round shadowed pagination dots and edge fade were the last pill-and-shadow artefacts. `ScrollRow` renders a plain scroll strip with desktop arrows that appear only when the strip can actually scroll.
+- Posters now show certification, a rating chip and a `year · type` line. The invented "Movie/Series as age rating" badge was replaced by real certification data when present.
+- Header navigation is a segmented control; the phone bar is a flat bar with an accent rule on the active tab. Only one navigation is visible at any width (phone bar below 64rem, header navigation at and above it).
+- Search, Saved, Appearance and Settings pages dropped the Astryx `Layout` wrapper for page sections with a shared title style, so their headings match the rest of the app.
+- Fixed a content bug found during the pass: addon rows printed `[object Object]` for providers whose resources are objects.
+
+Measured in the browser (Chromium, local preview, real addons)
+- Slop audit across all five routes: pill-radius elements 0, gradients 0 on every route except the hero scrim (1), blur 2 (header and phone bar only), shadows 1-3 (navigation inset hairline plus Astryx segmented control, both now flattened).
+- Contrast on the shipped dark palette: poster meta 7.45, shelf subtitle 8.78, poster title 14.9, hero synopsis 8.28, heading 17.56.
+- Contrast on the light palette (Catppuccin Latte): lowest 5.14. Tertiary ink is now an opaque mix rather than an alpha, which is what made the light palette fail at 3.45 before.
+- Phone 375x844: no horizontal overflow; every interactive target is at least 40px (0 of 129 below 40px). Poster rail 143px wide, three visible per row. Appearance grid resolves to 2 columns.
+- Tablet 885px: one navigation only (phone bar), shelf arrows present.
+- Desktop 1425x900: header navigation, hero 432px with side poster 160x240, poster rail 160x240, shelf strips scroll (4116px content in 1381px viewport).
+- Player unchanged from the previous pass except that it inherits the token layer.
+- Build and 51 tests pass.
+
+Not verified
+- Visual review by a human. Geometry, contrast, target size and computed styles were measured programmatically; nobody has looked at the rendered result yet.
+- Safari and iOS. Chromium only.
+- Production. Nothing pushed, merged or deployed for this pass.
+
+## Player chrome, subtitle placement and aspect modes (2026-11-09, local only)
+
+Reported: cues ran off the bottom of the screen, fullscreen did nothing, no aspect/zoom control, and the player chrome still read as generated rather than designed.
+
+Causes:
+- Browser-rendered cues anchor to the video element box, not the picture. The element spans the whole viewport, so cues sat at the screen bottom, under the control bar, even when the picture was letterboxed.
+- The fullscreen button toggled `document.fullscreenElement` only; iOS Safari needs `video.webkitEnterFullscreen`, and the previous state never re-synced on `fullscreenchange`.
+- There was no picture control at all: `object-fit` was fixed to `contain`.
+
+Changes:
+- `web/picture.js` computes the visible picture rect from stage size, intrinsic size, fit mode and zoom. Six unit tests cover letterbox, pillarbox, crop, stretch, zoom and missing metadata.
+- `web/SubtitleLayer.jsx` paints the active cue itself over that rect, so cues are bounded by the picture and lifted above the control bar while it is visible. Subtitle files are sanitised to inline emphasis only; `TextTrack.mode` stays `hidden` so the browser never draws a second copy.
+- Subtitle size and height are user controls (small/medium/large, low/standard/high), persisted per browser.
+- Aspect control in the Picture tab: Fit, Fill, Stretch plus zoom 100/110/125/150%, with keyboard `A` cycling fit.
+- Fullscreen: `requestFullscreen` on the player, `webkitEnterFullscreen` fallback for iOS, state synced from `fullscreenchange` and `webkitfullscreenchange`.
+- Chrome rebuilt as a matte instrument panel: one accent, hairline rules, no glow or gradients beyond the scrims, single 44px transport row, hover-only scrub bubble, sheet with three tabs (Tracks, Picture, Speed) instead of a stacked drawer.
+
+Measured in the browser against a local 640x360 fixture with a real SRT through the subtitle gateway:
+- Phone 375x844, Fit: picture occupies y 312-532; cue occupied y 374-427, inside the picture and 335px above the control bar.
+- Phone, Fill: cue bottom 744 with the bar at 762, an 18px gap, never under the bar.
+- Desktop 1425x900, Fit: picture y 49-851, cue bottom 751, bar top 818.
+- Subtitle height control moves the cue from 800 to 720; size control from 34px to 41.5px.
+- Phone transport: one 44px row, six controls, no horizontal overflow. Sheet rows 44px, tabs 40px, close 40px; sheet 359x426, fits without scrolling.
+
+Not verified:
+- Fullscreen engagement. The automation browser rejects `requestFullscreen` (the call never resolves), so the button path is implemented but unproven here; it needs one press on a real device.
+- Audio track switching on a multi-audio HLS source, and embedded HLS subtitle tracks. No such source was available.
+- Production. Nothing pushed or deployed for this change.
+
+## Player tracks and prewarmed ranking (2026-11-09, local only)
+
+Reported defects: no audio track switching, no subtitles from embedded tracks or the OpenSubtitles addon, a dead play button beside each episode, and Play starting the connection ranking every time.
+
+Causes found in the code:
+- The client never requested the `subtitles` addon resource, so no subtitle list existed for any source.
+- `Player` rendered `<track default>` at mount and never set `TextTrack.mode`, so even a present list could not be switched.
+- The episode card was a single button and the play glyph was a decorative span inside it; pressing it only re-selected the episode.
+- `selectBestStream` ran inside the Play handler, so probing started after the user pressed Play.
+
+Changes:
+- `server.mjs`: `GET /api/subtitles/list/:index/:type/:id` queries a subtitle addon with `filename`/`videoSize` hints and rewrites every returned URL to an opaque same-origin handle. `GET /api/subtitles/:handle` proxies the file, converts SRT to WebVTT, decodes UTF-8 with a windows-1252 fallback, refuses HTML/JSON responses and enforces a 4 MB cap and per-user ownership. Subtitle URLs are never exposed to the client.
+- `web/subtitles.js`: parallel discovery across subtitle addons, one track per addon and language, English first, failed addons counted without hiding the rest.
+- `web/Player.jsx`: real track control. Addon tracks render as `<track id>` and are switched through `TextTrack.mode`; HLS embedded subtitle and audio tracks are switched through hls.js; native `audioTracks` are used when the browser exposes them. One "Playback" sheet holds Audio, Subtitles, Quality and Speed. Subtitle size persists.
+- `web/App.jsx`: each episode row now has a separate 44px play button that selects the episode and starts automatic playback; the row body still selects without playing.
+- `web/Sources.jsx`: ranking is warmed as soon as sources arrive, cached for ten minutes per title and episode, and deduplicated across in-flight runs. Play consumes the cached ranking instead of starting probes. Refresh sources clears the cache.
+
+Browser evidence (local preview, real addons):
+- OpenSubtitles v3 list returned 39 languages for a movie; a sampled track served `text/vtt` and parsed 1,721 cues.
+- Selecting English set `TextTrack.mode = "showing"` with cues present; selecting another language disabled it.
+- Prewarm: opening a title issued 3 probe requests with no Play press. Pressing Play afterwards issued 0 additional probes and used the cached result immediately.
+- Play episode triggered the ranking flow and opened the stream list when no sampled source passed.
+- Phone geometry at 375px: compact dock 91px tall with one 44px control row (previously 199px and three rows), no horizontal overflow; the Playback sheet fits at 359x652. Desktop at 1440px: dock 864px centered, one 44px row, nine controls.
+- Build and 45 tests pass. Local preview restarted on http://127.0.0.1:4173/.
+
+Not verified:
+- Audio track switching against a multi-audio HLS source. No such source was available locally; the control path is implemented but unexercised. Progressive MP4/MKV audio tracks cannot be switched by any browser, and the sheet states that instead of offering a dead control.
+- Embedded subtitle tracks from an HLS manifest, for the same reason.
+- Every sampled AIOStreams playback URL from this host still returned HTTP 502 (upstream redirects to Authentik), so ranking produced an empty result and Play fell back to the stream list. This is the pre-existing provider-delivery condition, not a regression from these changes.
+- Production. Nothing was pushed, merged or deployed for this change; production remains at v0.4.1.
+
 ## v0.3.1 mobile follow-up (2026-11-09)
 
 Palette selection preserves the independently chosen typography. Hero actions use two rows on phones; pager buttons, arrows, catalogue filters and See all have 44 CSS pixel touch targets. The appearance dialog has more vertical room and its preview wraps on narrow screens. Page bottom spacing includes the device safe area. Desktop navigation waits until 64rem; theme and profile labels wait until 75rem, avoiding the observed off-screen header controls at 768px.

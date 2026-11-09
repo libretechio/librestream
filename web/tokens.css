@@ -1,0 +1,92 @@
+/* LibreStream tokens — Warm Graphite, maximum glass.
+   One scale for space, radius, type and blur. Palette values live in palettes.css;
+   everything here derives from them, so switching palette restyles the app. */
+
+:root {
+  /* space — 4px grid */
+  --ls-1: 0.25rem;
+  --ls-2: 0.5rem;
+  --ls-3: 0.75rem;
+  --ls-4: 1rem;
+  --ls-5: 1.25rem;
+  --ls-6: 1.5rem;
+  --ls-8: 2rem;
+  --ls-10: 2.5rem;
+  --ls-12: 3rem;
+
+  /* radius */
+  --ls-r-sm: 6px;
+  --ls-r: 10px;
+  --ls-r-md: 14px;
+  --ls-r-lg: 18px;
+  --ls-r-pill: 999px;
+
+  /* type */
+  --ls-t-2xs: 0.75rem;
+  --ls-t-xs: 0.75rem;
+  --ls-t-sm: 0.8125rem;
+  --ls-t-base: 0.875rem;
+  --ls-t-md: 1rem;
+  --ls-t-lg: 1.25rem;
+  --ls-t-xl: 1.75rem;
+  --ls-t-2xl: 2.5rem;
+
+  /* ink */
+  --ls-ink: var(--color-text-primary);
+  --ls-ink-2: var(--color-text-secondary);
+  --ls-ink-3: color-mix(in srgb, var(--color-text-secondary) 86%, var(--color-background-body));
+
+  /* surfaces */
+  --ls-bg: var(--color-background-body);
+  --ls-surface: var(--color-background-surface);
+  --ls-card: var(--color-background-card);
+  --ls-raised: var(--color-background-popover, var(--color-background-card));
+
+  /* glass — the app's main material */
+  --ls-glass: rgba(255, 255, 255, 0.05);
+  --ls-glass-2: rgba(255, 255, 255, 0.09);
+  --ls-glass-3: rgba(255, 255, 255, 0.14);
+  --ls-glass-line: rgba(255, 255, 255, 0.09);
+  --ls-glass-line-2: rgba(255, 255, 255, 0.14);
+  --ls-glass-panel: color-mix(in srgb, var(--ls-surface) 62%, transparent);
+  --ls-glass-panel-solid: color-mix(in srgb, var(--ls-surface) 88%, transparent);
+  --ls-blur-sm: blur(18px) saturate(170%);
+  --ls-blur: blur(28px) saturate(180%);
+  --ls-blur-lg: blur(40px) saturate(190%);
+  --ls-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
+  --ls-shadow-lg: 0 30px 70px rgba(0, 0, 0, 0.62);
+
+  /* accent: white is the action colour; mint only means "cached" */
+  --ls-accent: #ffffff;
+  --ls-accent-ink: #0a0a0c;
+  --ls-cached: #5eead4;
+  --ls-gold: #f5c518;
+
+  /* controls */
+  --ls-control-h: 2.25rem;
+  --ls-control-h-lg: 2.75rem;
+  --ls-focus: 2px solid #ffffff;
+
+  /* layout */
+  --ls-rail: 9.5rem;
+  --ls-rail-wide: 16.25rem;
+  --ls-page-pad: 1.25rem;
+  --ls-dock-h: 3.5rem;
+  --ls-dock-inset: 0.75rem;
+}
+
+@media (min-width: 48rem) {
+  :root {
+    --ls-rail: 9.5rem;
+    --ls-rail-wide: 16.25rem;
+    --ls-page-pad: 2.125rem;
+    --ls-dock-inset: 1.375rem;
+  }
+}
+
+@media (min-width: 80rem) {
+  :root {
+    --ls-rail: 9.5rem;
+    --ls-page-pad: 2.5rem;
+  }
+}

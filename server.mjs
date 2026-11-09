@@ -23,10 +23,48 @@ const MIME = {
   '.webp': 'image/webp'
 };
 
+const SUBTITLE_LIMIT = 4 * 1024 * 1024;
+const CUE_TAG = /<\/?font[^>]*>|\{\\[^}]*\}/gi;
+
+// Browsers only render WebVTT through <track>, and most subtitle addons serve SRT.
+export function srtToVtt(input) {
+  const text = String(input || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').trim();
+  if (!text) return null;
+  const out = ['WEBVTT', ''];
+  let cues = 0;
+  for (const block of text.split(/\n{2,}/)) {
+    const lines = block.split('\n');
+    const first = lines[0]?.trim() || '';
+    const offset = /^\d+$/.test(first) ? 1 : 0;
+    const timing = lines[offset] || '';
+    const match = timing.match(/^\s*(\d{1,3}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,3}:\d{2}:\d{2}[,.]\d{1,3})(.*)$/);
+    if (!match) continue;
+    const start = match[1].replace(',', '.');
+    const end = match[2].replace(',', '.');
+    const settings = (match[3] || '').trim();
+    const body = lines.slice(offset + 1).map(line => line.replace(CUE_TAG, '').trimEnd());
+    if (!body.some(Boolean)) continue;
+    out.push(`${start} --> ${end}${settings ? ' ' + settings : ''}`, ...body, '');
+    cues += 1;
+  }
+  return cues ? out.join('\n') : null;
+}
+
+function decodeText(bytes) {
+  const utf8 = new TextDecoder('utf-8').decode(bytes);
+  if (!utf8.includes('\uFFFD')) return utf8;
+  try {
+    return new TextDecoder('windows-1252').decode(bytes);
+  } catch {
+    return utf8;
+  }
+}
+
 export function createApp({addons=[], devIdentity=false, fetcher=fetch, root=resolve('build')}={}) {
   const cache = new Map();
   const inFlight = new Map();
   const streamHandles = new Map();
+  const subtitleHandles = new Map();
 
   async function upstream(index, path) {
     const addon = addons[index];
@@ -59,6 +97,19 @@ export function createApp({addons=[], devIdentity=false, fetcher=fetch, root=res
     try {
       const url = new URL(req.url, 'http://localhost');
       if (url.pathname === '/health') return send(200, {ok:true});
+
+      // Client-side throughput check: a fixed, cache-free payload from this origin.
+      // Read-only, no upstream call, no user data.
+      if (url.pathname === '/api/ping') {
+        const bytes = Math.min(Math.max(Number(url.searchParams.get('bytes')) || 262144, 1024), 1048576);
+        res.writeHead(200, {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': String(bytes),
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff'
+        });
+        return res.end(Buffer.alloc(bytes));
+      }
 
       // Production must be reachable only through the trusted Authentik proxy.
       const username = devIdentity ? 'local-preview' : req.headers['x-authentik-username'];
@@ -213,6 +264,80 @@ export function createApp({addons=[], devIdentity=false, fetcher=fetch, root=res
           if (res.destroyed) return;
           if (res.headersSent) return res.destroy();
           return send(502, {error:'This source did not respond. Choose another stream.'});
+        } finally { clearTimeout(timer); }
+      }
+
+      // Subtitle discovery: query a subtitle addon with the file hints the protocol expects.
+      const subtitleList = url.pathname.match(/^\/api\/subtitles\/list\/(\d+)\/([a-z]+)\/([^/]+)$/);
+      if (subtitleList) {
+        const [, index, type, id] = subtitleList;
+        const addon = addons[Number(index)];
+        if (!addon) return send(404, {error:'Addon unavailable'});
+        const extras = [];
+        const videoHash = String(url.searchParams.get('videoHash') || '').replace(/[^a-f0-9]/gi, '').slice(0, 32);
+        const videoSize = String(url.searchParams.get('videoSize') || '').replace(/\D/g, '').slice(0, 20);
+        const filename = String(url.searchParams.get('filename') || '').slice(0, 300);
+        if (videoHash) extras.push('videoHash=' + videoHash);
+        if (videoSize) extras.push('videoSize=' + videoSize);
+        if (filename) extras.push('filename=' + encodeURIComponent(filename));
+        const path = 'subtitles/' + encodeURIComponent(type) + '/' + encodeURIComponent(id) + (extras.length ? '/' + extras.join('&') : '') + '.json';
+        try {
+          const data = await upstream(Number(index), path);
+          const list = (Array.isArray(data?.subtitles) ? data.subtitles : []).flatMap(item => {
+            if (!item?.url) return [];
+            let href;
+            try { href = new URL(item.url); } catch { return []; }
+            if (!['http:', 'https:'].includes(href.protocol)) return [];
+            const handle = createHash('sha256').update(href.href + ':' + uid + ':' + Date.now() + Math.random()).digest('hex').slice(0, 32);
+            subtitleHandles.set(handle, {url: href.href, uid, created: Date.now()});
+            if (subtitleHandles.size > 4000) subtitleHandles.delete(subtitleHandles.keys().next().value);
+            const lang = String(item.lang || 'und').slice(0, 16);
+            return [{id: handle, url: '/api/subtitles/' + handle, lang, addon: String(addon.name || 'Addon').slice(0, 60), label: String(item.id || '').slice(0, 80)}];
+          });
+          return send(200, {subtitles: list});
+        } catch {
+          return send(502, {error:'Subtitle addon did not respond.'});
+        }
+      }
+
+      // Subtitle delivery: same-origin, converted to WebVTT so <track> can render it.
+      const subtitleFile = url.pathname.match(/^\/api\/subtitles\/([a-f0-9]{32})$/);
+      if (subtitleFile) {
+        const entry = subtitleHandles.get(subtitleFile[1]);
+        if (!entry) return send(404, {error:'Subtitle no longer available.'});
+        if (entry.uid !== uid && !devIdentity) return send(403, {error:'Forbidden'});
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 15000);
+        res.on('close', () => controller.abort());
+        try {
+          const upstreamRes = await fetcher(entry.url, {headers:{Accept:'text/vtt,text/plain,*/*','Accept-Encoding':'identity'}, redirect:'follow', signal:controller.signal});
+          const ctype = (upstreamRes.headers.get('content-type') || '').toLowerCase();
+          if (!upstreamRes.ok || /text\/html|application\/json/.test(ctype)) {
+            await upstreamRes.body?.cancel();
+            return send(502, {error:'Subtitle file unavailable.'});
+          }
+          const reader = upstreamRes.body?.getReader();
+          if (!reader) return send(502, {error:'Empty subtitle file.'});
+          const chunks = [];
+          let size = 0;
+          try {
+            while (true) {
+              const {value, done} = await reader.read();
+              if (done) break;
+              size += value.byteLength;
+              if (size > SUBTITLE_LIMIT) throw Error('Subtitle too large');
+              chunks.push(value);
+            }
+          } finally { await reader.cancel().catch(() => {}); }
+          const text = decodeText(Buffer.concat(chunks));
+          const trimmed = text.trimStart();
+          if (/^WEBVTT/.test(trimmed)) return send(200, trimmed, 'text/vtt; charset=utf-8');
+          if (!trimmed.includes('-->')) return send(502, {error:'Unsupported subtitle format.'});
+          const vtt = srtToVtt(text);
+          if (!vtt) return send(502, {error:'Unsupported subtitle format.'});
+          return send(200, vtt, 'text/vtt; charset=utf-8');
+        } catch {
+          return send(502, {error:'Subtitle file unavailable.'});
         } finally { clearTimeout(timer); }
       }
 

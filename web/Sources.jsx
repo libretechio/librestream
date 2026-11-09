@@ -1,34 +1,42 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Button } from '@astryxdesign/core/Button';
-import { Badge } from '@astryxdesign/core/Badge';
-import { Icon } from '@astryxdesign/core/Icon';
-import { Selector } from '@astryxdesign/core/Selector';
-import { VStack } from '@astryxdesign/core/VStack';
-import { HStack } from '@astryxdesign/core/HStack';
-import { Text } from '@astryxdesign/core/Text';
-import { Heading } from '@astryxdesign/core/Heading';
-import { RotateCw } from 'lucide-react';
-import { NuvioPlayIcon, BoltIcon } from './Icons.jsx';
-import { resource, supports, safeURL, sourceLabel } from './api';
-import { streamInfo, filterStreams, parseStreamMeta } from './streams';
-import { selectBestStream, waitForSources } from './autoSelect.js';
+import { Play, RotateCw } from 'lucide-react';
+import { Button, Chip, Spinner } from './ui.jsx';
+import { resource, supports, safeURL } from './api';
+import { streamInfo, filterStreams } from './streams';
+import { availabilityFromStreams, rememberAvailability } from './badges.js';
+import { readRanking, rankingKey, warmTitle, clearRankings } from './connection.js';
 
-export function Sources({ addons, meta, videoId, onPlay, autoStart = false, initialPicker = false, onSelectingChange, addonsLoading = false }) {
+export function Sources({
+  addons,
+  meta,
+  videoId,
+  onPlay,
+  autoStart = false,
+  initialPicker = false,
+  addonsLoading = false,
+  showActions = false,
+  openPicker = 0,
+  playRequest = 0,
+  onRankReady
+}) {
   const [rows, setRows] = useState([]);
   const [pending, setPending] = useState(0);
   const [failed, setFailed] = useState(0);
   const [retry, setRetry] = useState(0);
   const [filters, setFilters] = useState({ resolution: 'all', addon: 'all', cache: 'all' });
-
-  const [showPicker, setShowPicker] = useState(initialPicker);
+  const [showPicker, setShowPicker] = useState(Boolean(initialPicker));
   const [selecting, setSelecting] = useState(false);
   const [selectionStatus, setSelectionStatus] = useState('');
+  const [rankState, setRankState] = useState('idle');
+
   const discoveryRef = useRef(null);
   const selectionRef = useRef(null);
   const stateRef = useRef({ rows, pending, meta });
   stateRef.current = { rows, pending: pending + (addonsLoading ? 1 : 0), meta };
   const onPlayRef = useRef(onPlay);
   onPlayRef.current = onPlay;
+
+  const cacheKey = rankingKey(meta, videoId, meta.type);
 
   useEffect(() => {
     const run = { controller: new AbortController(), queried: new Set() };
@@ -38,7 +46,7 @@ export function Sources({ addons, meta, videoId, onPlay, autoStart = false, init
     setFailed(0);
     setSelecting(false);
     setSelectionStatus('');
-    setShowPicker(initialPicker);
+    setRankState('idle');
     stateRef.current = { rows: [], pending: 1, meta };
     return () => {
       run.controller.abort();
@@ -46,62 +54,104 @@ export function Sources({ addons, meta, videoId, onPlay, autoStart = false, init
     };
   }, [videoId, meta.type, retry]);
 
+  // One fetch per title: reuse the warm ranking instead of querying providers again.
   useEffect(() => {
     const run = discoveryRef.current;
-    for (const a of addons.filter(a => supports(a, 'stream', meta.type))) {
-      if (run.queried.has(a.index)) continue;
-      run.queried.add(a.index);
-      setPending(n => n + 1);
-      resource(a, 'stream', meta.type, videoId, '', run.controller.signal)
-        .then(data => {
-          if (run.controller.signal.aborted) return;
-          const incoming = (Array.isArray(data.streams) ? data.streams : []).map(stream => ({ a, stream, info: streamInfo(a, stream) }));
-          setRows(old => [...old, ...incoming]);
-        })
-        .catch(() => { if (!run.controller.signal.aborted) setFailed(n => n + 1); })
-        .finally(() => { if (!run.controller.signal.aborted) setPending(n => n - 1); });
-    }
-  }, [addons, videoId, meta.type, retry]);
+    let active = true;
+    setPending(1);
+    warmTitle({
+      key: cacheKey,
+      addons,
+      type: meta.type,
+      videoId,
+      meta,
+      signal: run.controller.signal
+    })
+      .then((entry) => {
+        if (!active || run.controller.signal.aborted) return;
+        if (!entry) {
+          setFailed((n) => n + 1);
+          return;
+        }
+        setRows(entry.rows);
+        setRankState(entry.ranked?.length ? 'ready' : 'failed');
+      })
+      .catch(() => {
+        if (active && !run.controller.signal.aborted) setFailed((n) => n + 1);
+      })
+      .finally(() => {
+        if (active && !run.controller.signal.aborted) setPending(0);
+      });
+    return () => {
+      active = false;
+    };
+  }, [cacheKey, addons, videoId, meta.type, retry]);
 
-  const chooseManually = () => {
-    selectionRef.current?.abort();
-    setSelecting(false);
+  // Remember what the providers actually offer, for the poster strip.
+  useEffect(() => {
+    if (pending > 0 || !rows.length) return;
+    rememberAvailability(
+      (meta.type || 'movie') + ':' + meta.id,
+      availabilityFromStreams(rows.map((row) => row.stream))
+    );
+  }, [pending, rows, meta.id, meta.type]);
+
+  // Play: use the warm ranking and start synchronously, inside the tap, so the
+  // browser counts it as user activation. Never opens the list, never measures.
+  const playAutomatically = () => {
+    setShowPicker(false);
     setSelectionStatus('');
-    setShowPicker(true);
+    const ready = readRanking(cacheKey);
+    if (ready?.ranked?.length) {
+      const streams = ready.ranked.map((row) => ({
+        ...row.stream,
+        autoSelection: {
+          addon: row.a?.name || row.a?.index,
+          resolution: row.info?.resolution || `${row.resolution || ''}p`,
+          bitrate: Math.round(row.bitrate || 0),
+          pingMs: ready.profile?.pingMs || 0
+        }
+      }));
+      onPlayRef.current(streams[0], { alternatives: streams.slice(1) });
+      return;
+    }
+    playAfterDiscovery();
   };
 
-  const playAutomatically = async () => {
+  // Cold path only: discovery has not finished, so wait for it once.
+  const playAfterDiscovery = async () => {
     selectionRef.current?.abort();
     const controller = new AbortController();
     selectionRef.current = controller;
     setSelecting(true);
-    setSelectionStatus('Finding responsive sources…');
     try {
-      const video = document.createElement('video');
-      const available = await waitForSources(() => stateRef.current, { signal: controller.signal, canPlayType: type => video.canPlayType(type) });
-      const ranked = await selectBestStream(available, {
-        meta: stateRef.current.meta,
-        signal: controller.signal,
-        saveData: Boolean(navigator.connection?.saveData),
-        canPlayType: type => video.canPlayType(type),
-        onStatus: setSelectionStatus
-      });
+      setSelectionStatus('Choosing a source…');
+      const warmed = await warmTitle({ key: cacheKey, addons, type: meta.type, videoId, meta, signal: controller.signal }).catch(() => null);
       if (controller.signal.aborted) return;
-      if (!ranked.length) {
-        setShowPicker(true);
-        setSelectionStatus('No source passed the connection check. Choose a stream below or refresh sources.');
+      const entry = readRanking(cacheKey) || warmed;
+      const available = entry?.rows?.length ? entry.rows : stateRef.current.rows;
+      if (!available.length) {
+        setSelectionStatus('No source is available yet. Pick one from the list.');
         return;
       }
-      const viable = ranked.some(row => row.fits) ? ranked.filter(row => row.fits) : ranked.slice(0, 1);
-      const streams = viable.map(row => ({
+      const ranked = entry?.verified ? entry.ranked : [];
+      if (!ranked.length) {
+        setSelectionStatus('No playable source. Pick one from the list.');
+        return;
+      }
+      const streams = ranked.map((row) => ({
         ...row.stream,
-        autoSelection: { addon: row.a.name, resolution: row.info.resolution, mbps: row.measurement.mbps, ttfbMs: row.measurement.ttfbMs, saveData: Boolean(navigator.connection?.saveData) }
+        autoSelection: {
+          addon: row.a?.name || row.a?.index,
+          resolution: row.info?.resolution || `${row.resolution || ''}p`,
+          bitrate: Math.round(row.bitrate || 0),
+          pingMs: entry?.profile?.pingMs || 0
+        }
       }));
       onPlayRef.current(streams[0], { alternatives: streams.slice(1) });
     } catch {
       if (!controller.signal.aborted) {
-        setShowPicker(true);
-        setSelectionStatus('Automatic selection could not finish. Choose a stream below.');
+        setSelectionStatus('Could not pick a source automatically.');
       }
     } finally {
       if (selectionRef.current === controller) setSelecting(false);
@@ -113,207 +163,160 @@ export function Sources({ addons, meta, videoId, onPlay, autoStart = false, init
     return () => selectionRef.current?.abort();
   }, [autoStart, videoId]);
 
-  useEffect(() => { onSelectingChange?.(selecting); }, [selecting, onSelectingChange]);
+  useEffect(() => {
+    if (!openPicker) return;
+    selectionRef.current?.abort();
+    setSelecting(false);
+    setSelectionStatus('');
+    setShowPicker(true);
+  }, [openPicker]);
+
+  // An explicit Play press re-runs selection, even when autoStart is unchanged.
+  useEffect(() => {
+    if (!playRequest) return;
+    playAutomatically();
+    return () => selectionRef.current?.abort();
+  }, [playRequest]);
 
   const playable = rows.filter(({ stream }) => safeURL(stream.url));
   const visible = filterStreams(playable, filters);
-  const unsupported = rows.length - playable.length;
-  const choose = (key, value) => setFilters((old) => ({ ...old, [key]: value }));
-  const qualities = [...new Set(playable.map((r) => r.info.resolution))].sort(
+  const qualities = [...new Set(playable.map((row) => row.info.resolution))].sort(
     (a, b) => (parseInt(b) || 0) - (parseInt(a) || 0)
   );
-  const streamProviders = addons.filter((a) => supports(a, 'stream', meta.type));
-  const cachedCount = playable.filter((r) => r.info.cache === 'cached').length;
+  const providers = addons.filter((addon) => supports(addon, 'stream', meta.type));
+  const cachedCount = playable.filter((row) => row.info.cache === 'cached').length;
+  const choose = (key, value) => setFilters((old) => ({ ...old, [key]: value }));
 
   return (
-    <VStack gap={4} className="sources">
-      <HStack gap={3} wrap="wrap" className="playback-actions" aria-label="Playback options">
-        <Button variant="primary" label="Play" icon={<NuvioPlayIcon size={16} />} onClick={playAutomatically} isLoading={selecting} />
-        <Button variant="secondary" label="Choose stream" onClick={chooseManually} />
-      </HStack>
-      {selectionStatus && <Text role="status" aria-live="polite" aria-busy={selecting}>{selectionStatus}</Text>}
-      {selecting && <Button variant="ghost" label="Cancel selection" onClick={chooseManually} />}
-      {!showPicker && !selecting && <Text type="supporting" color="secondary">Play checks a few sources and chooses one for your connection. Choose stream opens all sources.</Text>}
-      {showPicker && <>
-      <HStack vAlign="center" hAlign="between" wrap="wrap" gap={2}>
-        <Heading level={3}>Available Streams</Heading>
-        <Text role="status" type="supporting" color="secondary">
-          {visible.length} of {playable.length} streams
-          {pending > 0 ? ` · ${pending} addons querying…` : ''}
-        </Text>
-      </HStack>
-
-      {/* Nuvio ProviderFilterRow quick-tap pills */}
-      <div className="nuvio-stream-chips" role="group" aria-label="Quick stream filters">
-        <button
-          type="button"
-          className={`nuvio-chip ${
-            filters.resolution === 'all' && filters.cache === 'all' && filters.addon === 'all'
-              ? 'active'
-              : ''
-          }`}
-          onClick={() => setFilters({ resolution: 'all', addon: 'all', cache: 'all' })}
-        >
-          All ({playable.length})
-        </button>
-        {cachedCount > 0 && (
-          <button
-            type="button"
-            className={`nuvio-chip chip-cached ${filters.cache === 'cached' ? 'active' : ''}`}
-            onClick={() => choose('cache', filters.cache === 'cached' ? 'all' : 'cached')}
-          >
-            <BoltIcon size={13} />
-            TorBox Instant ({cachedCount})
-          </button>
-        )}
-        {qualities
-          .filter((q) => q !== 'unknown')
-          .map((q) => (
-            <button
-              key={q}
-              type="button"
-              className={`nuvio-chip ${filters.resolution === q ? 'active' : ''}`}
-              onClick={() => choose('resolution', filters.resolution === q ? 'all' : q)}
-            >
-              {q === '2160p' ? '4K UHD' : q}
-            </button>
-          ))}
-      </div>
-
-      {/* Astryx Structured Filter Selectors */}
-      <HStack gap={3} wrap="wrap" className="source-filters">
-        <Selector
-          label="Resolution"
-          presentation="popover"
-          value={filters.resolution}
-          onChange={(v) => choose('resolution', v)}
-          options={[
-            { value: 'all', label: 'All resolutions' },
-            ...qualities.map((value) => ({
-              value,
-              label:
-                value === 'unknown'
-                  ? 'Unknown resolution'
-                  : value === '2160p'
-                  ? '4K · 2160p'
-                  : value
-            }))
-          ]}
-        />
-        <Selector
-          label="Addon"
-          presentation="popover"
-          value={filters.addon}
-          onChange={(v) => choose('addon', v)}
-          options={[
-            { value: 'all', label: 'All addons' },
-            ...streamProviders.map((a) => ({ value: String(a.index), label: a.name }))
-          ]}
-        />
-        <Selector
-          label="TorBox cache"
-          presentation="popover"
-          value={filters.cache}
-          onChange={(v) => choose('cache', v)}
-          options={[
-            { value: 'all', label: 'All cache states' },
-            { value: 'cached', label: 'Cached on TorBox' },
-            { value: 'uncached', label: 'Uncached on TorBox' },
-            { value: 'unknown', label: 'Unknown / other provider' }
-          ]}
-        />
-      </HStack>
-
-      {/* Nuvio StreamCard List */}
-      <div className="source-results" aria-label="Stream results">
-        {visible.map(({ a, stream, info }, i) => {
-          const parsed = parseStreamMeta(a, stream, info);
-          const is4k = info.resolution === '2160p' || info.resolution === '4320p';
-          const isCached = info.cache === 'cached';
-          return (
-            <button
-              type="button"
-              key={a.index + ':' + i}
-              className={`nuvio-stream-card ${isCached ? 'stream-cached' : ''}`}
-              aria-label={sourceLabel(a, stream) || 'Play stream'}
-              onClick={() => onPlay(stream)}
-            >
-              <div className="stream-card-main">
-                <div className="stream-badge-row">
-                  <Badge
-                    variant={is4k ? 'yellow' : info.resolution === '1080p' ? 'blue' : 'neutral'}
-                    label={parsed.resolutionLabel}
-                  />
-                  {isCached && (
-                    <Badge
-                      variant="green"
-                      icon={<BoltIcon size={12} />}
-                      label="TorBox Instant"
-                    />
-                  )}
-                  {info.cache === 'uncached' && <Badge variant="orange" label="Uncached" />}
-                  {parsed.size && <Badge variant="neutral" label={parsed.size} />}
-                  {parsed.tags.map((t) => (
-                    <Badge key={t} variant="purple" label={t} />
-                  ))}
-                </div>
-                <span className="stream-primary-title">{parsed.primaryTitle}</span>
-                <span className="stream-secondary-sub">
-                  {a.name}
-                  {parsed.secondaryLine && parsed.secondaryLine !== a.name
-                    ? ` · ${parsed.secondaryLine}`
-                    : ''}
-                </span>
-              </div>
-              <div className="stream-card-action">
-                <span className="stream-addon-tag">{a.name}</span>
-                <span className="stream-play-circle" aria-hidden="true">
-                  <NuvioPlayIcon size={16} />
-                </span>
-              </div>
-            </button>
-          );
-        })}
-      </div>
-
-      {!visible.length && (
-        <Text role="status" color="secondary">
-          {pending
-            ? 'Querying addon providers for streams…'
-            : playable.length
-            ? 'No streams match these filters.'
-            : 'No browser-playable streams found for this title.'}
-        </Text>
-      )}
-
-      <HStack gap={3} wrap="wrap">
-        {Object.values(filters).some((v) => v !== 'all') && (
+    <div className="ls-streams">
+      {showActions && (
+        <div style={{ display: 'flex', gap: 'var(--ls-2)', flexWrap: 'wrap' }}>
           <Button
-            variant="secondary"
-            label="Clear filters"
-            onClick={() => setFilters({ resolution: 'all', addon: 'all', cache: 'all' })}
+            variant="primary"
+            icon={<Play size={14} fill="currentColor" strokeWidth={0} />}
+            label="Play"
+            busy={selecting}
+            onClick={playAutomatically}
           />
-        )}
-        <Button
-          variant="ghost"
-          icon={<Icon icon={RotateCw} />}
-          label="Refresh sources"
-          onClick={() => setRetry(retry + 1)}
-          isDisabled={pending > 0}
-        />
-      </HStack>
+          <Button variant="secondary" label="Choose stream" onClick={() => setShowPicker(true)} />
+        </div>
+      )}
 
-      {unsupported > 0 && (
-        <Text type="supporting" color="secondary">
-          {unsupported} P2P torrent magnet links omitted in web mode.
-        </Text>
+      {selectionStatus && (
+        <p className="ls-streams-count" role="status" aria-live="polite">
+          {selectionStatus}
+        </p>
       )}
-      {failed > 0 && (
-        <Text type="supporting" color="secondary">
-          {failed} addons timed out or did not respond.
-        </Text>
+
+      {showPicker && (
+        <>
+          <div className="ls-streams-head">
+            <div style={{ display: 'flex', gap: 'var(--ls-1)', flexWrap: 'wrap' }}>
+              <Chip
+                active={filters.resolution === 'all' && filters.cache === 'all'}
+                onClick={() => setFilters({ resolution: 'all', addon: 'all', cache: 'all' })}
+              >
+                All
+              </Chip>
+              {cachedCount > 0 && (
+                <Chip active={filters.cache === 'cached'} onClick={() => choose('cache', filters.cache === 'cached' ? 'all' : 'cached')}>
+                  Cached {cachedCount}
+                </Chip>
+              )}
+              {qualities
+                .filter((quality) => quality !== 'unknown')
+                .slice(0, 5)
+                .map((quality) => (
+                  <Chip
+                    key={quality}
+                    active={filters.resolution === quality}
+                    onClick={() => choose('resolution', filters.resolution === quality ? 'all' : quality)}
+                  >
+                    {quality === '2160p' ? '4K' : quality}
+                  </Chip>
+                ))}
+            </div>
+            <span className="ls-streams-count">
+              {visible.length} of {playable.length}
+              {pending > 0 ? ` · ${pending} querying` : ''}
+            </span>
+            {Object.values(filters).some((value) => value !== 'all') && (
+              <Button
+                variant="ghost"
+                size="sm"
+                label="Clear"
+                onClick={() => setFilters({ resolution: 'all', addon: 'all', cache: 'all' })}
+              />
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<RotateCw size={13} />}
+              label="Refresh"
+              disabled={pending > 0}
+              onClick={() => {
+                clearRankings();
+                setRetry((n) => n + 1);
+              }}
+            />
+          </div>
+
+          {pending > 0 && !visible.length && (
+            <p className="ls-streams-count" style={{ display: 'flex', alignItems: 'center', gap: 'var(--ls-2)' }}>
+              <Spinner label="Querying addons" /> Querying {providers.length} addons…
+            </p>
+          )}
+
+          {visible.map(({ a, stream, info }, index) => {
+            const quality = info.resolution === '2160p' ? '4K' : info.resolution === 'unknown' ? 'AUTO' : info.resolution;
+            const filename = stream.behaviorHints?.filename || stream.title || stream.name || 'Stream';
+            const size = stream.behaviorHints?.videoSize
+              ? `${(Number(stream.behaviorHints.videoSize) / 1024 ** 3).toFixed(1)} GB`
+              : '';
+            return (
+              <button
+                type="button"
+                key={a.index + ':' + index}
+                className="ls-stream"
+                onClick={() => onPlay(stream)}
+                aria-label={`Play ${a.name} ${filename}`}
+              >
+                <span className="ls-stream-tag">{quality}</span>
+                <span className="ls-stream-body">
+                  <span className="ls-stream-name">{filename}</span>
+                  <span className="ls-stream-sub">
+                    <span>{a.name}</span>
+                    {size && (
+                      <>
+                        <span>·</span>
+                        <span>{size}</span>
+                      </>
+                    )}
+                    {info.cache === 'cached' && (
+                      <>
+                        <span>·</span>
+                        <span className="ls-stream-dot" aria-hidden="true" />
+                        <span className="ls-stream-cached">cached</span>
+                      </>
+                    )}
+                  </span>
+                </span>
+                <span className="ls-stream-play" aria-hidden="true">
+                  <Play size={11} fill="currentColor" strokeWidth={0} />
+                </span>
+              </button>
+            );
+          })}
+
+          {!visible.length && pending === 0 && (
+            <p className="ls-streams-count">
+              {playable.length ? 'No streams match these filters.' : 'No browser-playable streams found.'}
+            </p>
+          )}
+
+          {failed > 0 && <p className="ls-streams-count">{failed} addons did not respond.</p>}
+        </>
       )}
-      </>}
-    </VStack>
+    </div>
   );
 }

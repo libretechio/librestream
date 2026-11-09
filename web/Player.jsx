@@ -1,10 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Button } from '@astryxdesign/core/Button';
-import { Icon } from '@astryxdesign/core/Icon';
-import { HStack } from '@astryxdesign/core/HStack';
-import { VStack } from '@astryxdesign/core/VStack';
-import { Text } from '@astryxdesign/core/Text';
-import { Heading } from '@astryxdesign/core/Heading';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Play,
@@ -16,38 +10,69 @@ import {
   Maximize,
   Minimize,
   Subtitles,
-  Settings,
+  Languages,
+  Gauge,
+  Check,
   Layers,
   PictureInPicture,
-  RotateCw as RefreshIcon,
+  RectangleHorizontal,
   X
 } from 'lucide-react';
+import { Button, IconButton } from './ui.jsx';
 import { safeURL, readState, writeState } from './api';
+import { fetchSubtitles, mergeSubtitleTracks, languageName } from './subtitles.js';
+import { SubtitleLayer } from './SubtitleLayer.jsx';
+import { pictureRect, FIT_CSS } from './picture.js';
 
 function formatTime(seconds) {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
-  if (h > 0) {
-    return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  }
+  if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+const FITS = {
+  fit: { label: 'Fit', hint: 'Whole picture, bars where needed', css: FIT_CSS.fit },
+  fill: { label: 'Fill', hint: 'Crops the edges to fill the screen', css: FIT_CSS.fill },
+  stretch: { label: 'Stretch', hint: 'Distorts to fill the screen', css: FIT_CSS.stretch }
+};
+const ZOOMS = [1, 1.1, 1.25, 1.5];
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+const SUB_SCALES = { small: 0.82, medium: 1, large: 1.22 };
+const SUB_OFFSETS = { low: 0.03, standard: 0.09, high: 0.2 };
+
+function readPref(key, fallback, allowed) {
+  try {
+    const value = localStorage.getItem('librestream:' + key);
+    return value && (!allowed || allowed.includes(value)) ? value : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writePref(key, value) {
+  try { localStorage.setItem('librestream:' + key, value); } catch {}
 }
 
 export function Player({
   meta,
   stream,
   user,
-  playerStyle = 'compact',
+  addons = [],
+  videoId,
   onProgress,
   onBack,
   onFailure,
   onSwitchSource
 }) {
-  const videoRef = useRef(null);
   const containerRef = useRef(null);
+  const videoRef = useRef(null);
+  const stageRef = useRef(null);
+  const chromeRef = useRef(null);
   const hideTimerRef = useRef(null);
+  const hlsRef = useRef(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -61,34 +86,44 @@ export function Player({
   const [needsGesture, setNeedsGesture] = useState(false);
   const [isBuffering, setIsBuffering] = useState(true);
   const [controlsVisible, setControlsVisible] = useState(true);
-  const [activePanel, setActivePanel] = useState(null); // 'subtitles' | 'audio' | 'speed' | 'settings'
-  const [subtitles, setSubtitles] = useState(stream.subtitles || []);
-  const [activeSubtitle, setActiveSubtitle] = useState(-1);
-  const [doubleTapFeedback, setDoubleTapFeedback] = useState(null); // 'left' | 'right'
+  const [activePanel, setActivePanel] = useState(null); // 'tracks' | 'picture' | 'speed'
+  const [addonSubs, setAddonSubs] = useState([]);
+  const [builtinSubs, setBuiltinSubs] = useState([]);
+  const [subsLoading, setSubsLoading] = useState(false);
+  const [subsNotice, setSubsNotice] = useState('');
+  const [activeSubId, setActiveSubId] = useState('off');
+  const [activeTrack, setActiveTrack] = useState(null);
+  const [audioTracks, setAudioTracks] = useState([]);
+  const [activeAudio, setActiveAudio] = useState(-1);
+  const [levels, setLevels] = useState([]);
+  const [activeLevel, setActiveLevel] = useState(-1);
+  const [subScale, setSubScale] = useState(() => readPref('sub_scale', 'medium', Object.keys(SUB_SCALES)));
+  const [subOffset, setSubOffset] = useState(() => readPref('sub_offset', 'standard', Object.keys(SUB_OFFSETS)));
+  const [fit, setFit] = useState(() => readPref('fit', 'fit', Object.keys(FITS)));
+  const [zoom, setZoom] = useState(() => Number(readPref('zoom', '1')) || 1);
+  const [picture, setPicture] = useState(null);
+  const [chromeHeight, setChromeHeight] = useState(0);
+  const [scrub, setScrub] = useState(null);
+  const [doubleTapFeedback, setDoubleTapFeedback] = useState(null);
 
-  // Wake and auto-hide controls
+  const subtitleTracks = useMemo(() => mergeSubtitleTracks(builtinSubs, addonSubs), [builtinSubs, addonSubs]);
+
   const wakeControls = () => {
     setControlsVisible(true);
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     hideTimerRef.current = setTimeout(() => {
-      if (videoRef.current && !videoRef.current.paused && !activePanel) {
-        setControlsVisible(false);
-      }
+      if (videoRef.current && !videoRef.current.paused && !activePanel) setControlsVisible(false);
     }, 3200);
   };
 
   const saveProgress = () => {
     const video = videoRef.current;
     if (video && Number.isFinite(video.duration) && Number.isFinite(video.currentTime)) {
-      onProgress?.({
-        ...meta,
-        position: video.currentTime,
-        duration: video.duration
-      });
+      onProgress?.({ ...meta, position: video.currentTime, duration: video.duration });
     }
   };
 
-  // Keep fallback bounded to the candidates checked by the initiating Play action.
+  // Playback source setup, resume, stall detection and bounded fallback.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -107,8 +142,40 @@ export function Player({
     setIsBuffering(true);
     setNeedsGesture(false);
     setFeedback('');
-    setSubtitles(stream.subtitles || []);
-    setActiveSubtitle(-1);
+    setBuiltinSubs([]);
+    setAudioTracks([]);
+    setLevels([]);
+    setActiveAudio(-1);
+    setActiveLevel(-1);
+
+    const readAudioTracks = () => {
+      if (!active) return;
+      if (hls?.audioTracks?.length) {
+        setAudioTracks(hls.audioTracks.map((track, index) => ({
+          index,
+          label: track.name || track.lang || `Track ${index + 1}`,
+          language: languageName(track.lang || track.name)
+        })));
+        setActiveAudio(hls.audioTrack);
+        return;
+      }
+      const native = video.audioTracks;
+      if (native && native.length) {
+        const list = [];
+        for (let index = 0; index < native.length; index += 1) {
+          const track = native[index];
+          list.push({
+            index,
+            label: track.label || track.language || `Track ${index + 1}`,
+            language: languageName(track.language)
+          });
+        }
+        setAudioTracks(list);
+        for (let index = 0; index < native.length; index += 1) {
+          if (native[index].enabled) setActiveAudio(index);
+        }
+      }
+    };
 
     const handleError = () => {
       if (!active || failing) return;
@@ -121,13 +188,14 @@ export function Player({
         return;
       }
       setIsBuffering(false);
-      setFeedback('This stream could not play smoothly. Choose another stream or quality.');
+      setFeedback('This stream could not play smoothly. Choose another stream.');
     };
     const handleLoadedMetadata = () => {
       setDuration(Number.isFinite(video.duration) ? video.duration : 0);
       const saved = readState(user.id, 'progress', {})[meta.type + ':' + meta.id];
       const position = meta.resumePosition || (saved?.playbackId === meta.playbackId ? saved.position : 0);
       if (position > 0 && position < video.duration - (meta.resumePosition ? 0.25 : 15)) video.currentTime = position;
+      readAudioTracks();
       video.play().catch(error => {
         if (!active) return;
         if (error.name === 'NotAllowedError') {
@@ -174,7 +242,16 @@ export function Player({
     startupTimer = setTimeout(() => {
       if (!document.hidden) handleError();
     }, 20000);
-    const events = { loadedmetadata: handleLoadedMetadata, playing: handlePlaying, pause: handlePause, waiting: handleWaiting, stalled: handleWaiting, seeking: handleSeeking, timeupdate: handleTimeUpdate, error: handleError };
+    const events = {
+      loadedmetadata: handleLoadedMetadata,
+      playing: handlePlaying,
+      pause: handlePause,
+      waiting: handleWaiting,
+      stalled: handleWaiting,
+      seeking: handleSeeking,
+      timeupdate: handleTimeUpdate,
+      error: handleError
+    };
     for (const [name, handler] of Object.entries(events)) video.addEventListener(name, handler);
     window.addEventListener('pagehide', saveProgress);
 
@@ -184,7 +261,7 @@ export function Player({
       let mimeType = stream.mimeType || '';
       if (!mimeType && url.startsWith('/api/playback/')) {
         try {
-          const head = await fetch(url, {method:'HEAD', credentials:'same-origin', signal:controller.signal});
+          const head = await fetch(url, { method: 'HEAD', credentials: 'same-origin', signal: controller.signal });
           if (head.ok) mimeType = head.headers.get('content-type') || '';
         } catch { if (!active) return; }
       }
@@ -194,13 +271,33 @@ export function Player({
         const Hls = (await import('hls.js')).default;
         if (!active) return;
         if (!Hls.isSupported()) return handleError();
-        hls = new Hls({enableWorker:true, capLevelToPlayerSize:Boolean(stream.autoSelection)});
+        // Cues are painted by the app, so hls.js must not paint them too.
+        hls = new Hls({ enableWorker: true, capLevelToPlayerSize: Boolean(stream.autoSelection), subtitleDisplay: false });
+        hlsRef.current = hls;
         if (stream.autoSelection?.saveData) {
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            const allowed = hls.levels.map((level, index) => ({level, index})).filter(({level}) => !level.height || level.height <= 720);
+            const allowed = hls.levels.map((level, index) => ({ level, index })).filter(({ level }) => !level.height || level.height <= 720);
             hls.autoLevelCapping = allowed.length ? allowed[allowed.length - 1].index : 0;
           });
         }
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (!active) return;
+          readAudioTracks();
+          setLevels(hls.levels.map((level, index) => ({ index, height: level.height, bitrate: level.bitrate })));
+          setActiveLevel(hls.autoLevelEnabled ? -1 : hls.currentLevel);
+        });
+        hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
+          if (!active) return;
+          setBuiltinSubs(hls.subtitleTracks.map((track, index) => ({
+            kind: 'builtin',
+            index,
+            lang: String(track.lang || 'und').toLowerCase(),
+            language: track.name || languageName(track.lang),
+            addon: 'Stream'
+          })));
+        });
+        hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, readAudioTracks);
+        hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, readAudioTracks);
         hls.attachMedia(video);
         hls.loadSource(url);
         hls.on(Hls.Events.ERROR, (_, data) => { if (data.fatal) handleError(); });
@@ -216,6 +313,7 @@ export function Player({
       for (const [name, handler] of Object.entries(events)) video.removeEventListener(name, handler);
       video.pause();
       hls?.destroy();
+      hlsRef.current = null;
       video.removeAttribute('src');
       video.load();
       window.removeEventListener('pagehide', saveProgress);
@@ -223,13 +321,127 @@ export function Player({
     };
   }, [stream]);
 
+  // Subtitle addons: queried once per stream, in parallel with playback.
+  useEffect(() => {
+    const controller = new AbortController();
+    setAddonSubs([]);
+    setSubsNotice('');
+    setActiveSubId('off');
+    const providers = addons.filter(addon =>
+      addon.resources?.some(resource =>
+        typeof resource === 'string' ? resource === 'subtitles' : resource.name === 'subtitles'
+      )
+    );
+    if (!providers.length) {
+      setSubsNotice('No subtitle addon is configured.');
+      return () => controller.abort();
+    }
+    setSubsLoading(true);
+    fetchSubtitles(addons, { type: meta.type, videoId: videoId || meta.id, stream, signal: controller.signal })
+      .then(result => {
+        if (controller.signal.aborted) return;
+        setAddonSubs(result.tracks);
+        if (!result.tracks.length) {
+          setSubsNotice(result.failed ? 'Subtitle addons did not respond.' : 'No subtitles found for this file.');
+        }
+      })
+      .catch(() => { if (!controller.signal.aborted) setSubsNotice('Subtitle search failed.'); })
+      .finally(() => { if (!controller.signal.aborted) setSubsLoading(false); });
+    return () => controller.abort();
+  }, [stream, addons, meta.type, meta.id, videoId]);
+
+  // Tracks are kept hidden: the app paints the cues itself.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const tracks = video.textTracks;
+    let chosen = null;
+    for (let index = 0; index < tracks.length; index += 1) {
+      const track = tracks[index];
+      const selected = activeSubId !== 'off' && track.id === activeSubId;
+      track.mode = selected ? 'hidden' : 'disabled';
+      if (selected) chosen = track;
+    }
+    setActiveTrack(chosen);
+  }, [activeSubId, addonSubs, builtinSubs]);
+
+  useEffect(() => {
+    const hls = hlsRef.current;
+    if (!hls) return;
+    if (activeSubId.startsWith('builtin:')) {
+      const index = Number(activeSubId.split(':')[1]);
+      if (hls.subtitleTrack !== index) hls.subtitleTrack = index;
+    } else if (hls.subtitleTrack !== -1) {
+      hls.subtitleTrack = -1;
+    }
+  }, [activeSubId]);
+
+  useEffect(() => {
+    const hls = hlsRef.current;
+    if (!hls || activeAudio < 0 || !hls.audioTracks?.length) return;
+    if (hls.audioTrack !== activeAudio) hls.audioTrack = activeAudio;
+  }, [activeAudio]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    const native = video?.audioTracks;
+    if (!native || !native.length || activeAudio < 0) return;
+    for (let index = 0; index < native.length; index += 1) native[index].enabled = index === activeAudio;
+  }, [activeAudio]);
+
+  useEffect(() => { writePref('sub_scale', subScale); }, [subScale]);
+  useEffect(() => { writePref('sub_offset', subOffset); }, [subOffset]);
+  useEffect(() => { writePref('fit', fit); }, [fit]);
+  useEffect(() => { writePref('zoom', String(zoom)); }, [zoom]);
+
+  // Track the picture rect and the chrome height so cues land inside the picture.
+  useEffect(() => {
+    const stage = stageRef.current;
+    const video = videoRef.current;
+    if (!stage) return;
+    const update = () => {
+      const box = stage.getBoundingClientRect();
+      setPicture(pictureRect(box.width, box.height, video?.videoWidth, video?.videoHeight, fit, zoom));
+      setChromeHeight(chromeRef.current?.getBoundingClientRect().height || 0);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(stage);
+    if (chromeRef.current) observer.observe(chromeRef.current);
+    video?.addEventListener('loadedmetadata', update);
+    video?.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+    return () => {
+      observer.disconnect();
+      video?.removeEventListener('loadedmetadata', update);
+      video?.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
+    };
+  }, [fit, zoom, controlsVisible]);
+
+  useEffect(() => {
+    const sync = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', sync);
+    document.addEventListener('webkitfullscreenchange', sync);
+    return () => {
+      document.removeEventListener('fullscreenchange', sync);
+      document.removeEventListener('webkitfullscreenchange', sync);
+    };
+  }, []);
+
+  const toggleSubtitleShortcut = () => {
+    if (activeSubId !== 'off') return setActiveSubId('off');
+    const english = subtitleTracks.find(track => track.lang.startsWith('en'));
+    const first = english || subtitleTracks[0];
+    if (first) setActiveSubId(first.kind === 'addon' ? first.id : `builtin:${first.index}`);
+  };
+
   // Keyboard controls
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
       const video = videoRef.current;
       if (!video) return;
-
       wakeControls();
       switch (e.key.toLowerCase()) {
         case ' ':
@@ -273,7 +485,14 @@ export function Player({
           break;
         case 'c':
           e.preventDefault();
-          setActiveSubtitle((cur) => (cur === -1 ? 0 : -1));
+          toggleSubtitleShortcut();
+          break;
+        case 'a':
+          e.preventDefault();
+          setFit((current) => {
+            const keys = Object.keys(FITS);
+            return keys[(keys.indexOf(current) + 1) % keys.length];
+          });
           break;
         case 'escape':
           if (activePanel) {
@@ -285,10 +504,9 @@ export function Player({
           break;
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activePanel]);
+  }, [activePanel, activeSubId, subtitleTracks]);
 
   const togglePlay = () => {
     const video = videoRef.current;
@@ -312,27 +530,30 @@ export function Player({
 
   const toggleFullscreen = async () => {
     const container = containerRef.current;
-    if (!container) return;
+    const video = videoRef.current;
+    if (!container || !video) return;
     try {
-      if (!document.fullscreenElement) {
-        await container.requestFullscreen();
-        setIsFullscreen(true);
-      } else {
+      if (document.fullscreenElement) {
         await document.exitFullscreen();
-        setIsFullscreen(false);
+        return;
       }
-    } catch {}
+      if (container.requestFullscreen) {
+        await container.requestFullscreen();
+        return;
+      }
+      // iOS Safari exposes fullscreen on the media element only.
+      if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+    } catch {
+      if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+    }
   };
 
   const togglePiP = async () => {
     const video = videoRef.current;
     if (!video) return;
     try {
-      if (document.pictureInPictureElement) {
-        await document.exitPictureInPicture();
-      } else if (document.pictureInPictureEnabled) {
-        await video.requestPictureInPicture();
-      }
+      if (document.pictureInPictureElement) await document.exitPictureInPicture();
+      else if (document.pictureInPictureEnabled) await video.requestPictureInPicture();
     } catch {}
   };
 
@@ -341,10 +562,15 @@ export function Player({
     if (!video) return;
     video.playbackRate = speed;
     setPlaybackSpeed(speed);
-    setActivePanel(null);
   };
 
-  // Double tap to skip on mobile
+  const chooseLevel = (index) => {
+    const hls = hlsRef.current;
+    if (!hls) return;
+    hls.currentLevel = index;
+    setActiveLevel(index);
+  };
+
   let lastTap = 0;
   const handleTouchEnd = (e) => {
     const now = Date.now();
@@ -363,453 +589,358 @@ export function Player({
   };
 
   const sourceName = stream.name || stream.title || 'Direct Stream';
+  const activeSub = subtitleTracks.find(track =>
+    activeSubId === (track.kind === 'addon' ? track.id : `builtin:${track.index}`)
+  );
+  const addonTracks = subtitleTracks.filter(track => track.kind === 'addon');
+  const played = duration ? (currentTime / duration) * 100 : 0;
+  const bufferedPct = duration ? Math.min(100, (buffered / duration) * 100) : 0;
+
+  // Cues sit above the control bar when it is showing, and stay inside the picture.
+  const cueInset = picture
+    ? controlsVisible && chromeHeight
+      ? Math.max(chromeHeight + 18, picture.height * SUB_OFFSETS[subOffset])
+      : Math.max(18, picture.height * SUB_OFFSETS[subOffset])
+    : 0;
+
+  const openPanel = (panel) => {
+    setActivePanel(activePanel === panel ? null : panel);
+    setControlsVisible(true);
+  };
+
+  const timelinePointer = (event) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (event.clientX - box.left) / box.width));
+    return { ratio, time: ratio * duration };
+  };
+
+  const audioLabel = activeAudio >= 0 && audioTracks[activeAudio] ? audioTracks[activeAudio].language : 'Audio';
+  const subLabel = activeSub ? activeSub.language : 'Subs off';
 
   return (
     <div
       ref={containerRef}
-      className={`ls-player-viewport ${controlsVisible ? 'controls-active' : 'controls-hidden'} player-${playerStyle}`}
+      className={`ls-player ${controlsVisible ? 'is-awake' : 'is-idle'}`}
+      data-fit={fit}
       onMouseMove={wakeControls}
       onTouchStart={wakeControls}
       onTouchEnd={handleTouchEnd}
       onDoubleClick={toggleFullscreen}
     >
-      <video
-        ref={videoRef}
-        id="video"
-        className="ls-video-canvas"
-        playsInline
-        preload="auto"
-        onClick={togglePlay}
-      >
-        {subtitles
-          .filter((s) => safeURL(s.url))
-          .map((s, i) => (
-            <track
-              key={i}
-              kind="subtitles"
-              src={s.url}
-              srcLang={s.lang || 'en'}
-              label={s.lang || `Track ${i + 1}`}
-              default={i === activeSubtitle}
-            />
-          ))}
-      </video>
-
-      {/* Buffering Spinner */}
-      {isBuffering && (
-        <div className="player-buffering-indicator" aria-label="Buffering stream">
-          <div className="ls-spinner" />
-          <Text color="secondary">Buffering…</Text>
-        </div>
-      )}
-
-      {/* Double-tap visual feedback */}
-      {doubleTapFeedback && (
-        <div className={`double-tap-ripple ${doubleTapFeedback}`}>
-          <Text type="heading-3">{doubleTapFeedback === 'left' ? '⟪ 10s' : '10s ⟫'}</Text>
-        </div>
-      )}
-
-      {/* Error / Status Toast */}
-      {feedback && (
-        <div className="player-feedback-overlay" role={needsGesture ? 'status' : 'alert'}>
-          <Text type="body">{feedback}</Text>
-          <HStack gap={2} vAlign="center" className="player-feedback-actions">
-            {needsGesture && <Button variant="primary" label="Play" icon={<Icon icon={Play} />} onClick={togglePlay} />}
-            <Button
-              variant="primary"
-              label="Choose stream"
-              icon={<Icon icon={Layers} />}
-              onClick={() => onSwitchSource?.()}
-            />
-            <Button variant="ghost" label="Go back" icon={<Icon icon={ArrowLeft} />} onClick={onBack} />
-          </HStack>
-        </div>
-      )}
-
-      {/* Top Header Bar */}
-      <div className="player-top-overlay">
-        <HStack gap={3} vAlign="center" className="player-top-content">
-          <button
-            type="button"
-            className="player-icon-btn"
-            aria-label="Back"
-            onClick={onBack}
-          >
-            <ArrowLeft size={22} />
-          </button>
-          <VStack gap={0} className="player-title-block">
-            <Heading level={3} className="player-media-title">
-              {meta.name || meta.title || 'Playing media'}
-            </Heading>
-            <Text type="supporting" className="player-media-sub">
-              {meta.playbackTitle || (meta.releaseInfo ? `${meta.releaseInfo} · ` : '')}
-              <span className="player-badge">{sourceName}</span>
-              {stream.autoSelection && <Text type="supporting">Auto · {stream.autoSelection.resolution === 'unknown' ? 'quality unknown' : stream.autoSelection.resolution} · {stream.autoSelection.addon}</Text>}
-            </Text>
-          </VStack>
-          <div className="player-top-spacer" />
-          <button
-            type="button"
-            className="player-icon-btn"
-            title="Choose stream"
-            aria-label="Choose stream"
-            onClick={() => onSwitchSource?.()}
-          >
-            <Layers size={20} />
-          </button>
-          <button
-            type="button"
-            className="player-icon-btn"
-            title="Fullscreen (F)"
-            aria-label="Fullscreen"
-            onClick={toggleFullscreen}
-          >
-            {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
-          </button>
-        </HStack>
+      <div className="ls-stage" ref={stageRef}>
+        <video
+          ref={videoRef}
+          id="video"
+          className="ls-video"
+          playsInline
+          preload="auto"
+          onClick={togglePlay}
+          style={{ objectFit: FITS[fit].css, transform: `scale(${zoom})` }}
+        >
+          {addonTracks
+            .filter((track) => safeURL(track.url))
+            .map((track) => (
+              <track
+                key={track.id}
+                id={track.id}
+                kind="subtitles"
+                src={track.url}
+                srcLang={track.lang || 'und'}
+                label={track.language}
+              />
+            ))}
+        </video>
+        <SubtitleLayer track={activeTrack} rect={picture} bottomInset={cueInset} scale={SUB_SCALES[subScale]} />
       </div>
 
-      {/* Right Drawer / Settings Panel (for Panel & Edge mode) */}
-      {activePanel && (
-        <div className="player-panel-drawer">
-          <HStack vAlign="center" className="panel-header">
-            <Heading level={4}>
-              {activePanel === 'subtitles' && 'Subtitles'}
-              {activePanel === 'speed' && 'Playback Speed'}
-              {activePanel === 'settings' && 'Audio & Options'}
-            </Heading>
-            <button
-              type="button"
-              className="player-icon-btn"
-              aria-label="Close panel"
-              onClick={() => setActivePanel(null)}
-            >
-              <X size={18} />
-            </button>
-          </HStack>
-
-          {activePanel === 'subtitles' && (
-            <VStack gap={2} className="panel-list">
-              <button
-                type="button"
-                className={`panel-item ${activeSubtitle === -1 ? 'active' : ''}`}
-                onClick={() => {
-                  setActiveSubtitle(-1);
-                  setActivePanel(null);
-                }}
-              >
-                Off
-              </button>
-              {subtitles.map((s, idx) => (
-                <button
-                  type="button"
-                  key={idx}
-                  className={`panel-item ${activeSubtitle === idx ? 'active' : ''}`}
-                  onClick={() => {
-                    setActiveSubtitle(idx);
-                    setActivePanel(null);
-                  }}
-                >
-                  {s.lang || `Track ${idx + 1}`}
-                </button>
-              ))}
-            </VStack>
-          )}
-
-          {activePanel === 'speed' && (
-            <VStack gap={2} className="panel-list">
-              {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((spd) => (
-                <button
-                  type="button"
-                  key={spd}
-                  className={`panel-item ${playbackSpeed === spd ? 'active' : ''}`}
-                  onClick={() => changeSpeed(spd)}
-                >
-                  {spd}× {spd === 1.0 ? '· Normal' : ''}
-                </button>
-              ))}
-            </VStack>
-          )}
-
-          {activePanel === 'settings' && (
-            <VStack gap={3} className="panel-list">
-              <button
-                type="button"
-                className="panel-item"
-                onClick={() => setActivePanel('speed')}
-              >
-                Speed ({playbackSpeed}×)
-              </button>
-              <button
-                type="button"
-                className="panel-item"
-                onClick={() => setActivePanel('subtitles')}
-              >
-                Subtitles ({activeSubtitle === -1 ? 'Off' : subtitles[activeSubtitle]?.lang || 'On'})
-              </button>
-              <button
-                type="button"
-                className="panel-item"
-                onClick={() => onSwitchSource?.()}
-              >
-                Change source stream
-              </button>
-              <button type="button" className="panel-item" onClick={togglePiP}>
-                Picture in Picture
-              </button>
-            </VStack>
-          )}
+      {isBuffering && (
+        <div className="ls-buffering" aria-label="Buffering">
+          <span className="ls-spinner" />
         </div>
       )}
 
-      {/* MPV Compact Bottom Toolbar (Style C) */}
-      {playerStyle === 'compact' && (
-        <div className="player-mpv-dock">
-          <div className="player-mpv-pill">
-            <div className="mpv-timeline-container">
-              <input
-                type="range"
-                className="mpv-progress-bar"
-                min={0}
-                max={duration || 100}
-                step={0.1}
-                value={currentTime}
-                onChange={(e) => seek(Number(e.target.value))}
-                aria-label="Seek timeline"
-              />
-              <div
-                className="mpv-buffered-track"
-                style={{ width: `${duration ? (buffered / duration) * 100 : 0}%` }}
-              />
-            </div>
+      {doubleTapFeedback && (
+        <div className={`ls-tap-feedback is-${doubleTapFeedback}`} aria-hidden="true">
+          {doubleTapFeedback === 'left' ? '−10s' : '+10s'}
+        </div>
+      )}
 
-            <HStack vAlign="center" className="mpv-controls-row">
-              <button
-                type="button"
-                className="mpv-btn"
-                title="Rewind 10s (←)"
-                aria-label="Rewind 10 seconds"
-                onClick={() => skip(-10)}
-              >
-                <RotateCcw size={18} />
-              </button>
-
-              <button
-                type="button"
-                className="mpv-btn primary-play"
-                title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
-                aria-label={isPlaying ? 'Pause' : 'Play'}
-                onClick={togglePlay}
-              >
-                {isPlaying ? <Pause size={20} /> : <Play size={20} />}
-              </button>
-
-              <button
-                type="button"
-                className="mpv-btn"
-                title="Forward 10s (→)"
-                aria-label="Forward 10 seconds"
-                onClick={() => skip(10)}
-              >
-                <RotateCw size={18} />
-              </button>
-
-              <Text className="mpv-timecode">
-                {formatTime(currentTime)} / {formatTime(duration)}
-              </Text>
-
-              <div className="mpv-spacer" />
-
-              <div className="mpv-volume-group">
-                <button
-                  type="button"
-                  className="mpv-btn"
-                  title="Mute (M)"
-                  aria-label="Mute"
-                  onClick={() => {
-                    const video = videoRef.current;
-                    if (video) {
-                      video.muted = !video.muted;
-                      setIsMuted(video.muted);
-                    }
-                  }}
-                >
-                  {isMuted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
-                </button>
-                <input
-                  type="range"
-                  className="mpv-volume-slider"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={isMuted ? 0 : volume}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    setVolume(v);
-                    if (videoRef.current) {
-                      videoRef.current.volume = v;
-                      videoRef.current.muted = false;
-                      setIsMuted(false);
-                    }
-                  }}
-                  aria-label="Volume"
-                />
-              </div>
-
-              <button
-                type="button"
-                className={`mpv-btn ${activeSubtitle !== -1 ? 'highlight' : ''}`}
-                title="Subtitles (C)"
-                aria-label="Subtitles"
-                onClick={() => setActivePanel(activePanel === 'subtitles' ? null : 'subtitles')}
-              >
-                <Subtitles size={18} />
-              </button>
-
-              <button
-                type="button"
-                className="mpv-btn speed-btn"
-                title="Playback Speed"
-                aria-label="Playback Speed"
-                onClick={() => setActivePanel(activePanel === 'speed' ? null : 'speed')}
-              >
-                <span>{playbackSpeed}×</span>
-              </button>
-
-              <button
-                type="button"
-                className="mpv-btn"
-                title="Picture in Picture"
-                aria-label="Picture in Picture"
-                onClick={togglePiP}
-              >
-                <PictureInPicture size={18} />
-              </button>
-
-              <button
-                type="button"
-                className="mpv-btn"
-                title="Fullscreen (F)"
-                aria-label="Fullscreen"
-                onClick={toggleFullscreen}
-              >
-                {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
-              </button>
-            </HStack>
+      {feedback && (
+        <div className="ls-player-notice" role={needsGesture ? 'status' : 'alert'}>
+          <p>{feedback}</p>
+          <div style={{ display: 'flex', gap: 'var(--ls-2)', flexWrap: 'wrap' }}>
+            {needsGesture && <Button variant="primary" size="sm" label="Play" onClick={togglePlay} />}
+            <Button variant="secondary" size="sm" label="Choose stream" onClick={() => onSwitchSource?.()} />
+            <Button variant="ghost" size="sm" label="Go back" onClick={onBack} />
           </div>
         </div>
       )}
 
-      {/* Classic Edge Controls / Settings (Styles A & B) */}
-      {playerStyle !== 'compact' && (
-        <div className="player-bottom-overlay">
-          <div className="edge-timeline-container">
+      <header className="ls-player-top">
+        <IconButton icon={<ArrowLeft size={18} />} label="Back" onClick={onBack} />
+        <div className="ls-player-title">
+          <b>{meta.name || meta.title || 'Playing'}</b>
+          <span>
+            {[meta.playbackTitle || meta.releaseInfo, sourceName].filter(Boolean).join(' · ')}
+          </span>
+        </div>
+        <div className="ls-player-pills">
+          <button type="button" className="ls-pill" onClick={() => openPanel('tracks')}>
+            {audioLabel}
+            <span className="sep">·</span>
+            {subLabel}
+          </button>
+          <button type="button" className="ls-pill" onClick={() => onSwitchSource?.()}>
+            <Layers size={14} />
+            {sourceName.length > 24 ? sourceName.slice(0, 24) + '…' : sourceName}
+          </button>
+        </div>
+      </header>
+
+      {activePanel === 'tracks' && (
+        <div className="ls-popover" style={{ right: 'var(--ls-4)', top: '4.75rem', maxHeight: '60dvh', overflowY: 'auto' }}>
+          <span className="ls-popover-label">Audio</span>
+          <div className="ls-popover-rows">
+            {audioTracks.length === 0 && (
+              <p className="ls-popover-label" style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>
+                Single track
+              </p>
+            )}
+            {audioTracks.map((track) => (
+              <button
+                key={track.index}
+                type="button"
+                className={`ls-popover-row ${activeAudio === track.index ? 'is-active' : ''}`}
+                onClick={() => setActiveAudio(track.index)}
+              >
+                <span>{track.language}</span>
+                {activeAudio === track.index && <Check size={14} />}
+              </button>
+            ))}
+          </div>
+
+          <span className="ls-popover-label">Subtitles</span>
+          <div className="ls-popover-rows">
+            <button
+              type="button"
+              className={`ls-popover-row ${activeSubId === 'off' ? 'is-active' : ''}`}
+              onClick={() => setActiveSubId('off')}
+            >
+              <span>Off</span>
+              {activeSubId === 'off' && <Check size={14} />}
+            </button>
+            {subtitleTracks.map((track) => {
+              const key = track.kind === 'addon' ? track.id : `builtin:${track.index}`;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  className={`ls-popover-row ${activeSubId === key ? 'is-active' : ''}`}
+                  onClick={() => setActiveSubId(key)}
+                >
+                  <span>{track.language}</span>
+                  {activeSubId === key && <Check size={14} />}
+                </button>
+              );
+            })}
+          </div>
+          {subsLoading && <span className="ls-popover-label">Searching subtitles…</span>}
+          {!subsLoading && subsNotice && (
+            <span className="ls-popover-label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+              {subsNotice}
+            </span>
+          )}
+
+          <span className="ls-popover-label">Subtitle size</span>
+          <div className="ls-popover-seg">
+            {Object.keys(SUB_SCALES).map((size) => (
+              <button
+                key={size}
+                type="button"
+                className={subScale === size ? 'is-active' : ''}
+                onClick={() => setSubScale(size)}
+              >
+                {size}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {activePanel === 'picture' && (
+        <div className="ls-popover is-picture">
+          <span className="ls-popover-label">Aspect</span>
+          <div className="ls-popover-rows">
+            {Object.entries(FITS).map(([key, value]) => (
+              <button
+                key={key}
+                type="button"
+                className={`ls-popover-row ${fit === key ? 'is-active' : ''}`}
+                onClick={() => setFit(key)}
+              >
+                <span>{value.label}</span>
+                {fit === key && <Check size={14} />}
+              </button>
+            ))}
+          </div>
+          <span className="ls-popover-label">Zoom</span>
+          <div className="ls-popover-seg">
+            {ZOOMS.map((value) => (
+              <button
+                key={value}
+                type="button"
+                className={zoom === value ? 'is-active' : ''}
+                onClick={() => setZoom(value)}
+              >
+                {Math.round(value * 100)}%
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {activePanel === 'speed' && (
+        <div className="ls-popover is-picture">
+          <span className="ls-popover-label">Speed</span>
+          <div className="ls-popover-rows">
+            {SPEEDS.map((speed) => (
+              <button
+                key={speed}
+                type="button"
+                className={`ls-popover-row ${playbackSpeed === speed ? 'is-active' : ''}`}
+                onClick={() => changeSpeed(speed)}
+              >
+                <span>{speed}×</span>
+                {playbackSpeed === speed && <Check size={14} />}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="ls-player-deck" ref={chromeRef}>
+        <div
+          className="ls-timeline"
+          onPointerMove={(event) => {
+            if (duration) setScrub(timelinePointer(event));
+          }}
+          onPointerLeave={() => setScrub(null)}
+        >
+          <div className="ls-timeline-track">
+            <div className="ls-timeline-buffer" style={{ width: `${bufferedPct}%` }} />
+            <div className="ls-timeline-played" style={{ width: `${played}%` }} />
+            <div className="ls-timeline-knob" style={{ left: `${played}%` }} />
+          </div>
+          {scrub && (
+            <span className="ls-scrub-bubble" style={{ left: `${scrub.ratio * 100}%` }}>
+              {formatTime(scrub.time)}
+            </span>
+          )}
+          <input
+            type="range"
+            className="ls-timeline-input"
+            min={0}
+            max={duration || 100}
+            step={0.1}
+            value={currentTime}
+            onChange={(event) => seek(Number(event.target.value))}
+            aria-label="Seek"
+          />
+        </div>
+
+        <div className="ls-transport">
+          <button
+            type="button"
+            className="ls-play-btn"
+            aria-label={isPlaying ? 'Pause' : 'Play'}
+            onClick={togglePlay}
+          >
+            {isPlaying ? <Pause size={17} /> : <Play size={17} fill="currentColor" strokeWidth={0} />}
+          </button>
+          <button type="button" className="ls-chrome-btn" aria-label="Rewind 10 seconds" onClick={() => skip(-10)}>
+            <RotateCcw size={16} />
+          </button>
+          <button type="button" className="ls-chrome-btn" aria-label="Forward 10 seconds" onClick={() => skip(10)}>
+            <RotateCw size={16} />
+          </button>
+
+          <span className="ls-timecode">
+            {formatTime(currentTime)}
+            <em>/ {formatTime(duration)}</em>
+          </span>
+
+          <div className="ls-transport-spacer" />
+
+          <div className="ls-volume">
+            <button
+              type="button"
+              className="ls-chrome-btn"
+              aria-label="Mute"
+              onClick={() => {
+                const video = videoRef.current;
+                if (video) {
+                  video.muted = !video.muted;
+                  setIsMuted(video.muted);
+                }
+              }}
+            >
+              {isMuted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
+            </button>
             <input
               type="range"
-              className="mpv-progress-bar"
+              className="ls-volume-input"
               min={0}
-              max={duration || 100}
-              step={0.1}
-              value={currentTime}
-              onChange={(e) => seek(Number(e.target.value))}
-              aria-label="Seek timeline"
-            />
-            <div
-              className="mpv-buffered-track"
-              style={{ width: `${duration ? (buffered / duration) * 100 : 0}%` }}
+              max={1}
+              step={0.05}
+              value={isMuted ? 0 : volume}
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                setVolume(next);
+                if (videoRef.current) {
+                  videoRef.current.volume = next;
+                  videoRef.current.muted = false;
+                  setIsMuted(false);
+                }
+              }}
+              aria-label="Volume"
             />
           </div>
 
-          <HStack vAlign="center" className="edge-controls-row">
-            <button
-              type="button"
-              className="player-icon-btn primary"
-              aria-label={isPlaying ? 'Pause' : 'Play'}
-              onClick={togglePlay}
-            >
-              {isPlaying ? <Pause size={24} /> : <Play size={24} />}
-            </button>
-            <button
-              type="button"
-              className="player-icon-btn"
-              aria-label="Rewind 10 seconds"
-              onClick={() => skip(-10)}
-            >
-              <RotateCcw size={20} />
-            </button>
-            <button
-              type="button"
-              className="player-icon-btn"
-              aria-label="Forward 10 seconds"
-              onClick={() => skip(10)}
-            >
-              <RotateCw size={20} />
-            </button>
-
-            <Text className="mpv-timecode">
-              {formatTime(currentTime)} / {formatTime(duration)}
-            </Text>
-
-            <div className="mpv-spacer" />
-
-            <div className="mpv-volume-group">
-              <button
-                type="button"
-                className="player-icon-btn"
-                aria-label="Mute"
-                onClick={() => {
-                  const video = videoRef.current;
-                  if (video) {
-                    video.muted = !video.muted;
-                    setIsMuted(video.muted);
-                  }
-                }}
-              >
-                {isMuted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
-              </button>
-              <input
-                type="range"
-                className="mpv-volume-slider"
-                min={0}
-                max={1}
-                step={0.05}
-                value={isMuted ? 0 : volume}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  setVolume(v);
-                  if (videoRef.current) {
-                    videoRef.current.volume = v;
-                    videoRef.current.muted = false;
-                    setIsMuted(false);
-                  }
-                }}
-                aria-label="Volume"
-              />
-            </div>
-
-            <button
-              type="button"
-              className="player-icon-btn"
-              title="Settings"
-              aria-label="Settings"
-              onClick={() => setActivePanel(activePanel === 'settings' ? null : 'settings')}
-            >
-              <Settings size={20} />
-            </button>
-
-            <button
-              type="button"
-              className="player-icon-btn"
-              title="Fullscreen"
-              aria-label="Fullscreen"
-              onClick={toggleFullscreen}
-            >
-              {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
-            </button>
-          </HStack>
+          <button
+            type="button"
+            className={`ls-chrome-btn ${activeSub ? 'is-on' : ''}`}
+            aria-label="Audio and subtitles"
+            title="Audio and subtitles (C)"
+            onClick={() => openPanel('tracks')}
+          >
+            <Subtitles size={16} />
+          </button>
+          <button
+            type="button"
+            className={`ls-chrome-btn ${activePanel === 'picture' ? 'is-on' : ''}`}
+            aria-label={`Aspect ratio: ${FITS[fit].label}`}
+            title={`Aspect: ${FITS[fit].label} (A)`}
+            onClick={() => openPanel('picture')}
+          >
+            <RectangleHorizontal size={16} />
+          </button>
+          <button
+            type="button"
+            className="ls-chrome-btn"
+            aria-label="Playback speed"
+            title="Playback speed"
+            onClick={() => openPanel('speed')}
+          >
+            {playbackSpeed}×
+          </button>
+          <button type="button" className="ls-chrome-btn" aria-label="Picture in picture" onClick={togglePiP}>
+            <PictureInPicture size={16} />
+          </button>
+          <button type="button" className="ls-chrome-btn" aria-label="Fullscreen" onClick={toggleFullscreen}>
+            {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
+          </button>
         </div>
-      )}
+      </div>
     </div>
   );
 }
