@@ -32,7 +32,6 @@ export function HeroBanner({
 
   const active = slides[index] || slides[0];
   const backdrop = safeURL(active.background || active.banner || active.poster);
-  const poster = safeURL(active.poster || active.background);
   const logo = !logoBroken[active.id] ? safeURL(active.logo) : '';
   const title = active.name || active.title || active.id;
   const rating = active.imdbRating || active.rating;
@@ -155,17 +154,6 @@ export function HeroBanner({
               )}
             </HStack>
           </VStack>
-
-          {/* Desktop floating poster preview card */}
-          {poster && (
-            <div
-              className="hero-SidePoster"
-              onClick={() => onDetails(active)}
-              role="presentation"
-            >
-              <img src={poster} alt="" className="hero-side-poster-img" />
-            </div>
-          )}
         </div>
 
         {/* Multi-slide Hero Pager Controls (Nuvio HomeHeroSection pill indicator) */}

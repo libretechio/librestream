@@ -391,25 +391,6 @@ body {
   min-width: 0;
 }
 
-.hero-SidePoster {
-  display: none;
-  flex-shrink: 0;
-  width: 10.5rem;
-  aspect-ratio: 2 / 3;
-  border-radius: var(--ls-radius-md);
-  overflow: hidden;
-  border: 1px solid var(--ls-glass-line);
-  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
-  cursor: pointer;
-}
-
-.hero-side-poster-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
 .hero-meta-top {
   display: flex;
   align-items: center;
@@ -2860,8 +2841,6 @@ body {
 }
 
 @media (min-width: 48rem) {
-  .hero-SidePoster { display: block; }
-
   .hero-premiere { min-height: 25rem; }
   .hero-focus { min-height: 21rem; }
 

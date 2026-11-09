@@ -1,5 +1,11 @@
 # LibreStream validation
 
+## Hero: side poster removed (2026-11-09, local only)
+
+The hero showed the same title twice — widescreen backdrop plus a portrait poster card on the right. The card is gone; the hero is one artwork with copy on the scrim. Removed `.hero-SidePoster` and `.hero-side-poster-img` from `HeroBanner.jsx` and `browser.css`, including the 48rem rule that revealed it.
+
+Measured at 1440, 1024 and 390px: 0 side posters, exactly 1 image in the hero, 4 CTAs, no horizontal overflow. Hero height 432px desktop/tablet, 411px phone. Build and 66 tests pass.
+
 ## Frosted glass pass + poster information split (2026-11-09, local only)
 
 Reference: a Google Stitch mockup the user liked (Apple TV+ / Infuse frosted glass), used as a style reference for existing components only. Nothing was copied wholesale.
