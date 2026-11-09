@@ -23,6 +23,7 @@ import { safeURL, readState, writeState } from './api';
 import { fetchSubtitles, mergeSubtitleTracks, languageName } from './subtitles.js';
 import { SubtitleLayer } from './SubtitleLayer.jsx';
 import { pictureRect, FIT_CSS } from './picture.js';
+import { resumePosition } from './progress.js';
 
 function formatTime(seconds) {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
@@ -193,7 +194,7 @@ export function Player({
     const handleLoadedMetadata = () => {
       setDuration(Number.isFinite(video.duration) ? video.duration : 0);
       const saved = readState(user.id, 'progress', {})[meta.type + ':' + meta.id];
-      const position = meta.resumePosition || (saved?.playbackId === meta.playbackId ? saved.position : 0);
+      const position = resumePosition(meta, saved);
       if (position > 0 && position < video.duration - (meta.resumePosition ? 0.25 : 15)) video.currentTime = position;
       readAudioTracks();
       video.play().catch(error => {

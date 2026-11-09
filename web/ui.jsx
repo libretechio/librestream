@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import { lockBodyScroll } from './scrollLock.js';
 
 /* LibreStream primitives. No component library: these are the only controls
    the app uses, built on native elements so focus, keyboard and semantics
@@ -163,13 +164,12 @@ export function Modal({ open, onClose, children, labelledBy, wide = false, bare 
     };
 
     document.addEventListener('keydown', onKey);
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const unlockScroll = lockBodyScroll();
     const timer = setTimeout(() => focusables()[0]?.focus(), 30);
 
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = previousOverflow;
+      unlockScroll();
       clearTimeout(timer);
       if (previousFocus instanceof HTMLElement) previousFocus.focus();
     };

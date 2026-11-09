@@ -527,11 +527,8 @@ function TitlePage({
       if (event.key === 'Escape') onClose();
     };
     document.addEventListener('keydown', onKey);
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = previous;
     };
   }, [onClose]);
 
@@ -975,6 +972,7 @@ export function App({ onThemeChange }) {
     setAlternatives(selection?.alternatives || []);
     setActiveStream(streamObj);
     setPlayingMeta(mediaMeta);
+    setExpandedCatalog(null);
     setItem(null);
     setEpisode(null);
   };
@@ -1252,11 +1250,11 @@ export function App({ onThemeChange }) {
               title={expandedCatalog.subtitle || 'All titles'}
               items={expandedCatalog.items}
               grid
+              {...shelfProps}
               onOpen={(picked) => {
                 setExpandedCatalog(null);
                 openTitle(picked);
               }}
-              {...shelfProps}
             />
           </div>
         </Modal>
