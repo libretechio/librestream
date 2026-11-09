@@ -104,110 +104,116 @@ export function createApp({addons=[], devIdentity=false, fetcher=fetch, root=res
         return send(200, await Promise.all(pending));
       }
 
-      // Playback streaming proxy
+      // Playback and measurement share the same authenticated delivery path.
       const playMatch = url.pathname.match(/^\/api\/playback\/([a-f0-9]{32})(?:\/(.*))?$/);
       if (playMatch) {
         const [, handle, subpath] = playMatch;
         const entry = streamHandles.get(handle);
         if (!entry) return send(404, {error:'Stream handle expired or not found.'});
         if (entry.uid !== uid && !devIdentity) return send(403, {error:'Forbidden'});
-
-        let targetUrl = entry.url;
-        if (subpath === 'sub' && url.searchParams.has('url')) {
-          try {
-            const sub = new URL(url.searchParams.get('url'));
-            if (sub.protocol === 'http:' || sub.protocol === 'https:') targetUrl = sub.href;
-          } catch {}
-        } else if (subpath) {
-          try {
-            targetUrl = new URL(subpath, entry.url).href;
-          } catch {}
-        }
-
-        const headers = {
-          'Accept': '*/*',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
-        };
-        if (req.headers.range) headers['Range'] = req.headers.range;
-        if (req.headers['if-range']) headers['If-Range'] = req.headers['if-range'];
-
+        entry.assets ||= new Map();
+        const targetUrl = subpath ? entry.assets.get(subpath.replace(/^asset\//, '')) : entry.url;
+        if (subpath && (!/^asset\/[a-f0-9]{24}$/.test(subpath) || !targetUrl)) return send(404, {error:'Media resource not found.'});
+        const probing = url.searchParams.has('probe');
+        const limit = 1024 * 1024;
+        const headers = {Accept:'*/*', 'Accept-Encoding':'identity', 'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'};
+        if (probing) headers.Range = `bytes=0-${limit - 1}`;
+        else if (req.headers.range) headers.Range = req.headers.range;
+        if (!probing && req.headers['if-range']) headers['If-Range'] = req.headers['if-range'];
         const controller = new AbortController();
-        req.on('close', () => controller.abort());
-
-        let upstreamRes;
+        const disconnect = () => controller.abort();
+        res.on('close', disconnect);
+        const timer = setTimeout(disconnect, probing ? 9000 : 20000);
         try {
-          upstreamRes = await fetcher(targetUrl, {
-            headers,
-            redirect: 'follow',
-            signal: controller.signal
-          });
-        } catch (err) {
-          if (controller.signal.aborted) return;
-          return send(502, {error:'Upstream stream connection failed.'});
-        }
-
-        const ctype = (upstreamRes.headers.get('content-type') || '').toLowerCase();
-        if (ctype.includes('text/html') || (ctype.includes('application/json') && upstreamRes.status >= 400)) {
-          const sample = await upstreamRes.text();
-          if (sample.includes('authentik') || sample.includes('challenge') || sample.includes('Sign In') || upstreamRes.status === 403 || upstreamRes.status === 401) {
-            return send(502, {error:'Stream source requires external authentication or returned an error page.'});
+          let upstreamRes = await fetcher(targetUrl, {headers, method:req.method === 'HEAD' ? 'HEAD' : 'GET', redirect:'follow', signal:controller.signal});
+          if (req.method === 'HEAD' && [405, 501].includes(upstreamRes.status)) {
+            await upstreamRes.body?.cancel();
+            upstreamRes = await fetcher(targetUrl, {headers:{...headers, Range:'bytes=0-0'}, method:'GET', redirect:'follow', signal:controller.signal});
           }
-        }
-
-        const outHeaders = {
-          'Accept-Ranges': 'bytes',
-          'Content-Disposition': 'inline',
-          'Access-Control-Allow-Origin': '*',
-          'Cache-Control': 'no-cache'
-        };
-
-        let finalType = ctype;
-        const ext = extname(new URL(targetUrl).pathname.split('?')[0]).toLowerCase();
-        const fname = (entry.filename || '').toLowerCase();
-        if (!ctype || ctype === 'application/octet-stream') {
-          if (ext === '.mp4' || fname.endsWith('.mp4')) finalType = 'video/mp4';
-          else if (ext === '.mkv' || fname.endsWith('.mkv')) finalType = 'video/x-matroska';
-          else if (ext === '.webm' || fname.endsWith('.webm')) finalType = 'video/webm';
-          else if (ext === '.m3u8' || fname.endsWith('.m3u8')) finalType = 'application/vnd.apple.mpegurl';
-          else if (ext === '.ts' || fname.endsWith('.ts')) finalType = 'video/mp2t';
-          else finalType = 'video/mp4';
-        }
-        outHeaders['Content-Type'] = finalType;
-
-        if (finalType.includes('mpegurl') || targetUrl.includes('.m3u8')) {
-          const m3u8Text = await upstreamRes.text();
-          const rewritten = m3u8Text.split('\n').map(line => {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith('#')) return line;
+          const ctype = (upstreamRes.headers.get('content-type') || '').toLowerCase();
+          if (!upstreamRes.ok || /text\/html|application\/json/.test(ctype)) {
+            await upstreamRes.body?.cancel();
+            return send(502, {error:'This source did not return playable media. Choose another stream.'});
+          }
+          const ext = extname(new URL(targetUrl).pathname).toLowerCase();
+          const fname = !subpath ? String(entry.filename || '').toLowerCase() : '';
+          let finalType = ctype;
+          if (!ctype || /octet-stream/.test(ctype)) {
+            const types = {'.mp4':'video/mp4','.mkv':'video/x-matroska','.webm':'video/webm','.m3u8':'application/vnd.apple.mpegurl','.ts':'video/mp2t','.aac':'audio/aac','.vtt':'text/vtt','.key':'application/octet-stream'};
+            finalType = types[ext] || types[extname(fname)] || (!subpath ? 'video/mp4' : 'application/octet-stream');
+          }
+          const isPlaylist = /mpegurl/.test(finalType) || ext === '.m3u8' || fname.endsWith('.m3u8');
+          const outHeaders = {'Content-Type':isPlaylist ? 'application/vnd.apple.mpegurl' : finalType, 'Content-Disposition':'inline','Accept-Ranges':'bytes','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};
+          if (req.method === 'HEAD') {
+            if (upstreamRes.headers.has('content-length')) outHeaders['Content-Length'] = upstreamRes.headers.get('content-length');
+            await upstreamRes.body?.cancel();
+            res.writeHead(upstreamRes.status, outHeaders);
+            return res.end();
+          }
+          if (isPlaylist) {
+            const reader = upstreamRes.body?.getReader();
+            if (!reader) return send(502, {error:'Empty media playlist.'});
+            const chunks = [];
+            let size = 0;
             try {
-              const abs = new URL(trimmed, targetUrl).href;
-              return '/api/playback/' + handle + '/sub?url=' + encodeURIComponent(abs);
-            } catch {
-              return line;
-            }
-          }).join('\n');
-          res.writeHead(200, {
-            'Content-Type': 'application/vnd.apple.mpegurl',
-            'Content-Disposition': 'inline',
-            'Access-Control-Allow-Origin': '*',
-            'Cache-Control': 'no-cache'
-          });
-          return res.end(rewritten);
-        }
-
-        if (upstreamRes.headers.has('content-length')) outHeaders['Content-Length'] = upstreamRes.headers.get('content-length');
-        if (upstreamRes.headers.has('content-range')) outHeaders['Content-Range'] = upstreamRes.headers.get('content-range');
-        if (upstreamRes.headers.has('etag')) outHeaders['ETag'] = upstreamRes.headers.get('etag');
-
-        res.writeHead(upstreamRes.status, outHeaders);
-        if (req.method === 'HEAD') return res.end();
-
-        if (upstreamRes.body) {
-          Readable.fromWeb(upstreamRes.body).pipe(res);
-        } else {
-          res.end();
-        }
-        return;
+              while (true) {
+                const {value, done} = await reader.read();
+                if (done) break;
+                size += value.byteLength;
+                if (size > limit) throw Error('Playlist too large');
+                chunks.push(value);
+              }
+            } finally { await reader.cancel().catch(() => {}); }
+            const text = Buffer.concat(chunks).toString('utf8');
+            if (!text.trimStart().startsWith('#EXTM3U')) return send(502, {error:'Invalid media playlist.'});
+            const resourceURL = raw => {
+              const absolute = new URL(raw, upstreamRes.url || targetUrl);
+              if (!['http:', 'https:'].includes(absolute.protocol)) throw Error('Invalid media resource');
+              const token = createHash('sha256').update(handle + ':' + absolute.href).digest('hex').slice(0, 24);
+              if (entry.assets.size >= 10000 && !entry.assets.has(token)) throw Error('Playlist too large');
+              entry.assets.set(token, absolute.href);
+              return '/api/playback/' + handle + '/asset/' + token;
+            };
+            const rewritten = text.split(/\r?\n/).map(line => {
+              const trimmed = line.trim();
+              if (!trimmed) return line;
+              if (trimmed.startsWith('#')) return line.replace(/URI="([^"]+)"/g, (_, raw) => `URI="${resourceURL(raw)}"`);
+              return resourceURL(trimmed);
+            }).join('\n');
+            res.writeHead(200, outHeaders);
+            return res.end(rewritten);
+          }
+          if (upstreamRes.headers.has('content-length')) {
+            const length = Number(upstreamRes.headers.get('content-length'));
+            if (Number.isFinite(length)) outHeaders['Content-Length'] = String(probing ? Math.min(length, limit) : length);
+          }
+          if (upstreamRes.headers.has('content-range')) outHeaders['Content-Range'] = upstreamRes.headers.get('content-range');
+          if (upstreamRes.headers.has('etag')) outHeaders.ETag = upstreamRes.headers.get('etag');
+          res.writeHead(upstreamRes.status, outHeaders);
+          if (!upstreamRes.body) return res.end();
+          if (probing) {
+            const reader = upstreamRes.body.getReader();
+            let sent = 0;
+            try {
+              while (sent < limit && !res.destroyed) {
+                const {value, done} = await reader.read();
+                if (done) break;
+                const chunk = value.subarray(0, limit - sent);
+                res.write(chunk);
+                sent += chunk.byteLength;
+              }
+            } finally { await reader.cancel().catch(() => {}); controller.abort(); }
+            return res.end();
+          }
+          const body = Readable.fromWeb(upstreamRes.body);
+          body.on('error', () => res.destroy());
+          body.pipe(res);
+          return;
+        } catch {
+          if (res.destroyed) return;
+          if (res.headersSent) return res.destroy();
+          return send(502, {error:'This source did not respond. Choose another stream.'});
+        } finally { clearTimeout(timer); }
       }
 
       // Addon routing
@@ -239,7 +245,8 @@ export function createApp({addons=[], devIdentity=false, fetcher=fetch, root=res
               return {
                 ...stream,
                 url: '/api/playback/' + handle,
-                playbackUrl: '/api/playback/' + handle
+                playbackUrl: '/api/playback/' + handle,
+                sourceId: createHash('sha256').update(uid + ':' + stream.url).digest('hex').slice(0, 24)
               };
             });
             return send(200, { ...data, streams: sanitized });

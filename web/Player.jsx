@@ -42,6 +42,7 @@ export function Player({
   playerStyle = 'compact',
   onProgress,
   onBack,
+  onFailure,
   onSwitchSource
 }) {
   const videoRef = useRef(null);
@@ -56,7 +57,8 @@ export function Player({
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [feedback, setFeedback] = useState('Loading stream…');
+  const [feedback, setFeedback] = useState('');
+  const [needsGesture, setNeedsGesture] = useState(false);
   const [isBuffering, setIsBuffering] = useState(true);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [activePanel, setActivePanel] = useState(null); // 'subtitles' | 'audio' | 'speed' | 'settings'
@@ -86,106 +88,136 @@ export function Player({
     }
   };
 
-  // Video and HLS engine
+  // Keep fallback bounded to the candidates checked by the initiating Play action.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-
+    const controller = new AbortController();
     let hls = null;
     let active = true;
+    let failing = false;
     let lastSaved = 0;
+    let lastPosition = meta.resumePosition || 0;
+    let stallTimer;
+    let startupTimer;
+    setCurrentTime(0);
+    setDuration(0);
+    setBuffered(0);
+    setIsPlaying(false);
+    setIsBuffering(true);
+    setNeedsGesture(false);
+    setFeedback('');
+    setSubtitles(stream.subtitles || []);
+    setActiveSubtitle(-1);
 
-    const handleLoadedMetadata = () => {
-      setDuration(video.duration || 0);
-      setIsBuffering(false);
-      const saved = readState(user.id, 'progress', {})[meta.type + ':' + meta.id];
-      if (saved?.playbackId === meta.playbackId && saved.position < video.duration - 15) {
-        video.currentTime = saved.position;
+    const handleError = () => {
+      if (!active || failing) return;
+      failing = true;
+      clearTimeout(startupTimer);
+      clearTimeout(stallTimer);
+      setControlsVisible(true);
+      if (onFailure?.(video.currentTime || lastPosition)) {
+        setIsBuffering(true);
+        return;
       }
-      video.play().catch(() => setFeedback('Click play to begin streaming.'));
+      setIsBuffering(false);
+      setFeedback('This stream could not play smoothly. Choose another stream or quality.');
     };
-
+    const handleLoadedMetadata = () => {
+      setDuration(Number.isFinite(video.duration) ? video.duration : 0);
+      const saved = readState(user.id, 'progress', {})[meta.type + ':' + meta.id];
+      const position = meta.resumePosition || (saved?.playbackId === meta.playbackId ? saved.position : 0);
+      if (position > 0 && position < video.duration - (meta.resumePosition ? 0.25 : 15)) video.currentTime = position;
+      video.play().catch(error => {
+        if (!active) return;
+        if (error.name === 'NotAllowedError') {
+          clearTimeout(startupTimer);
+          clearTimeout(stallTimer);
+          setIsBuffering(false);
+          setNeedsGesture(true);
+          setFeedback('Tap Play to begin.');
+        } else if (error.name !== 'AbortError') handleError();
+      });
+    };
     const handlePlaying = () => {
+      clearTimeout(startupTimer);
+      clearTimeout(stallTimer);
       setIsPlaying(true);
       setIsBuffering(false);
+      setNeedsGesture(false);
       setFeedback('');
     };
-
     const handlePause = () => {
+      clearTimeout(startupTimer);
+      clearTimeout(stallTimer);
       setIsPlaying(false);
       wakeControls();
     };
-
     const handleWaiting = () => {
+      if (video.paused || video.seeking) return;
       setIsBuffering(true);
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        if (active && !video.paused && !video.seeking && !document.hidden) handleError();
+      }, 15000);
     };
-
+    const handleSeeking = () => clearTimeout(stallTimer);
     const handleTimeUpdate = () => {
+      if (video.currentTime > lastPosition + 0.1) clearTimeout(stallTimer);
+      lastPosition = video.currentTime;
       setCurrentTime(video.currentTime);
-      if (video.buffered.length > 0) {
-        try {
-          const end = video.buffered.end(video.buffered.length - 1);
-          setBuffered(end);
-        } catch {}
+      if (video.buffered.length) {
+        try { setBuffered(video.buffered.end(video.buffered.length - 1)); } catch {}
       }
-      if (Date.now() - lastSaved > 4000) {
-        saveProgress();
-        lastSaved = Date.now();
-      }
+      if (Date.now() - lastSaved > 4000) { saveProgress(); lastSaved = Date.now(); }
     };
-
-    const handleError = () => {
-      setIsBuffering(false);
-      setFeedback('This stream failed to play in your browser. Switch to another source or quality.');
-      setControlsVisible(true);
-    };
-
-    video.addEventListener('loadedmetadata', handleLoadedMetadata);
-    video.addEventListener('playing', handlePlaying);
-    video.addEventListener('pause', handlePause);
-    video.addEventListener('waiting', handleWaiting);
-    video.addEventListener('timeupdate', handleTimeUpdate);
-    video.addEventListener('error', handleError);
+    startupTimer = setTimeout(() => {
+      if (!document.hidden) handleError();
+    }, 20000);
+    const events = { loadedmetadata: handleLoadedMetadata, playing: handlePlaying, pause: handlePause, waiting: handleWaiting, stalled: handleWaiting, seeking: handleSeeking, timeupdate: handleTimeUpdate, error: handleError };
+    for (const [name, handler] of Object.entries(events)) video.addEventListener(name, handler);
     window.addEventListener('pagehide', saveProgress);
 
     (async () => {
       const url = safeURL(stream.url);
-      if (!url) {
-        handleError();
-        return;
+      if (!url) return handleError();
+      let mimeType = stream.mimeType || '';
+      if (!mimeType && url.startsWith('/api/playback/')) {
+        try {
+          const head = await fetch(url, {method:'HEAD', credentials:'same-origin', signal:controller.signal});
+          if (head.ok) mimeType = head.headers.get('content-type') || '';
+        } catch { if (!active) return; }
       }
-
-      if (/\.m3u8(?:\?|$)/i.test(url) && !video.canPlayType('application/vnd.apple.mpegurl')) {
+      if (!active) return;
+      const isHls = /mpegurl/.test(mimeType) || /\.m3u8(?:\?|$)/i.test(url);
+      if (isHls && !video.canPlayType('application/vnd.apple.mpegurl')) {
         const Hls = (await import('hls.js')).default;
         if (!active) return;
-        if (Hls.isSupported()) {
-          hls = new Hls({ enableWorker: true, lowLatencyMode: true });
-          hls.attachMedia(video);
-          hls.loadSource(url);
-          hls.on(Hls.Events.ERROR, (_, data) => {
-            if (data.fatal) handleError();
+        if (!Hls.isSupported()) return handleError();
+        hls = new Hls({enableWorker:true, capLevelToPlayerSize:Boolean(stream.autoSelection)});
+        if (stream.autoSelection?.saveData) {
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            const allowed = hls.levels.map((level, index) => ({level, index})).filter(({level}) => !level.height || level.height <= 720);
+            hls.autoLevelCapping = allowed.length ? allowed[allowed.length - 1].index : 0;
           });
-        } else {
-          handleError();
         }
-      } else {
-        video.src = url;
-      }
+        hls.attachMedia(video);
+        hls.loadSource(url);
+        hls.on(Hls.Events.ERROR, (_, data) => { if (data.fatal) handleError(); });
+      } else video.src = url;
     })().catch(handleError);
 
     return () => {
       active = false;
+      controller.abort();
+      clearTimeout(startupTimer);
+      clearTimeout(stallTimer);
       saveProgress();
+      for (const [name, handler] of Object.entries(events)) video.removeEventListener(name, handler);
       video.pause();
       hls?.destroy();
       video.removeAttribute('src');
       video.load();
-      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      video.removeEventListener('playing', handlePlaying);
-      video.removeEventListener('pause', handlePause);
-      video.removeEventListener('waiting', handleWaiting);
-      video.removeEventListener('timeupdate', handleTimeUpdate);
-      video.removeEventListener('error', handleError);
       window.removeEventListener('pagehide', saveProgress);
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     };
@@ -203,7 +235,7 @@ export function Player({
         case ' ':
         case 'k':
           e.preventDefault();
-          if (video.paused) video.play();
+          if (video.paused) video.play().catch(() => {});
           else video.pause();
           break;
         case 'arrowleft':
@@ -261,7 +293,7 @@ export function Player({
   const togglePlay = () => {
     const video = videoRef.current;
     if (!video) return;
-    if (video.paused) video.play();
+    if (video.paused) video.play().catch(() => {});
     else video.pause();
   };
 
@@ -380,12 +412,13 @@ export function Player({
 
       {/* Error / Status Toast */}
       {feedback && (
-        <div className="player-feedback-overlay" role="alert">
+        <div className="player-feedback-overlay" role={needsGesture ? 'status' : 'alert'}>
           <Text type="body">{feedback}</Text>
           <HStack gap={2} vAlign="center" className="player-feedback-actions">
+            {needsGesture && <Button variant="primary" label="Play" icon={<Icon icon={Play} />} onClick={togglePlay} />}
             <Button
               variant="primary"
-              label="Switch stream source"
+              label="Choose stream"
               icon={<Icon icon={Layers} />}
               onClick={() => onSwitchSource?.()}
             />
@@ -412,14 +445,15 @@ export function Player({
             <Text type="supporting" className="player-media-sub">
               {meta.playbackTitle || (meta.releaseInfo ? `${meta.releaseInfo} · ` : '')}
               <span className="player-badge">{sourceName}</span>
+              {stream.autoSelection && <Text type="supporting">Auto · {stream.autoSelection.resolution === 'unknown' ? 'quality unknown' : stream.autoSelection.resolution} · {stream.autoSelection.addon}</Text>}
             </Text>
           </VStack>
           <div className="player-top-spacer" />
           <button
             type="button"
             className="player-icon-btn"
-            title="Switch Source"
-            aria-label="Switch Source"
+            title="Choose stream"
+            aria-label="Choose stream"
             onClick={() => onSwitchSource?.()}
           >
             <Layers size={20} />

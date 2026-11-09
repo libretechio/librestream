@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button } from '@astryxdesign/core/Button';
 import { Badge } from '@astryxdesign/core/Badge';
 import { Icon } from '@astryxdesign/core/Icon';
@@ -11,41 +11,109 @@ import { RotateCw } from 'lucide-react';
 import { NuvioPlayIcon, BoltIcon } from './Icons.jsx';
 import { resource, supports, safeURL, sourceLabel } from './api';
 import { streamInfo, filterStreams, parseStreamMeta } from './streams';
+import { selectBestStream, waitForSources } from './autoSelect.js';
 
-export function Sources({ addons, meta, videoId, onPlay }) {
+export function Sources({ addons, meta, videoId, onPlay, autoStart = false, initialPicker = false, onSelectingChange, addonsLoading = false }) {
   const [rows, setRows] = useState([]);
   const [pending, setPending] = useState(0);
   const [failed, setFailed] = useState(0);
   const [retry, setRetry] = useState(0);
   const [filters, setFilters] = useState({ resolution: 'all', addon: 'all', cache: 'all' });
 
-  useEffect(() => {
-    const controller = new AbortController();
-    const providers = addons.filter((a) => supports(a, 'stream', meta.type));
-    setRows([]);
-    setPending(providers.length);
-    setFailed(0);
+  const [showPicker, setShowPicker] = useState(initialPicker);
+  const [selecting, setSelecting] = useState(false);
+  const [selectionStatus, setSelectionStatus] = useState('');
+  const discoveryRef = useRef(null);
+  const selectionRef = useRef(null);
+  const stateRef = useRef({ rows, pending, meta });
+  stateRef.current = { rows, pending: pending + (addonsLoading ? 1 : 0), meta };
+  const onPlayRef = useRef(onPlay);
+  onPlayRef.current = onPlay;
 
-    for (const a of providers) {
-      resource(a, 'stream', meta.type, videoId, '', controller.signal)
-        .then((data) => {
-          if (controller.signal.aborted) return;
-          const incoming = (Array.isArray(data.streams) ? data.streams : []).map((stream) => ({
-            a,
-            stream,
-            info: streamInfo(a, stream)
-          }));
-          setRows((old) => [...old, ...incoming]);
+  useEffect(() => {
+    const run = { controller: new AbortController(), queried: new Set() };
+    discoveryRef.current = run;
+    setRows([]);
+    setPending(0);
+    setFailed(0);
+    setSelecting(false);
+    setSelectionStatus('');
+    setShowPicker(initialPicker);
+    stateRef.current = { rows: [], pending: 1, meta };
+    return () => {
+      run.controller.abort();
+      selectionRef.current?.abort();
+    };
+  }, [videoId, meta.type, retry]);
+
+  useEffect(() => {
+    const run = discoveryRef.current;
+    for (const a of addons.filter(a => supports(a, 'stream', meta.type))) {
+      if (run.queried.has(a.index)) continue;
+      run.queried.add(a.index);
+      setPending(n => n + 1);
+      resource(a, 'stream', meta.type, videoId, '', run.controller.signal)
+        .then(data => {
+          if (run.controller.signal.aborted) return;
+          const incoming = (Array.isArray(data.streams) ? data.streams : []).map(stream => ({ a, stream, info: streamInfo(a, stream) }));
+          setRows(old => [...old, ...incoming]);
         })
-        .catch(() => {
-          if (!controller.signal.aborted) setFailed((n) => n + 1);
-        })
-        .finally(() => {
-          if (!controller.signal.aborted) setPending((n) => n - 1);
-        });
+        .catch(() => { if (!run.controller.signal.aborted) setFailed(n => n + 1); })
+        .finally(() => { if (!run.controller.signal.aborted) setPending(n => n - 1); });
     }
-    return () => controller.abort();
-  }, [videoId, addons, meta.type, retry]);
+  }, [addons, videoId, meta.type, retry]);
+
+  const chooseManually = () => {
+    selectionRef.current?.abort();
+    setSelecting(false);
+    setSelectionStatus('');
+    setShowPicker(true);
+  };
+
+  const playAutomatically = async () => {
+    selectionRef.current?.abort();
+    const controller = new AbortController();
+    selectionRef.current = controller;
+    setSelecting(true);
+    setSelectionStatus('Finding responsive sources…');
+    try {
+      const video = document.createElement('video');
+      const available = await waitForSources(() => stateRef.current, { signal: controller.signal, canPlayType: type => video.canPlayType(type) });
+      const ranked = await selectBestStream(available, {
+        meta: stateRef.current.meta,
+        signal: controller.signal,
+        saveData: Boolean(navigator.connection?.saveData),
+        canPlayType: type => video.canPlayType(type),
+        onStatus: setSelectionStatus
+      });
+      if (controller.signal.aborted) return;
+      if (!ranked.length) {
+        setShowPicker(true);
+        setSelectionStatus('No source passed the connection check. Choose a stream below or refresh sources.');
+        return;
+      }
+      const viable = ranked.some(row => row.fits) ? ranked.filter(row => row.fits) : ranked.slice(0, 1);
+      const streams = viable.map(row => ({
+        ...row.stream,
+        autoSelection: { addon: row.a.name, resolution: row.info.resolution, mbps: row.measurement.mbps, ttfbMs: row.measurement.ttfbMs, saveData: Boolean(navigator.connection?.saveData) }
+      }));
+      onPlayRef.current(streams[0], { alternatives: streams.slice(1) });
+    } catch {
+      if (!controller.signal.aborted) {
+        setShowPicker(true);
+        setSelectionStatus('Automatic selection could not finish. Choose a stream below.');
+      }
+    } finally {
+      if (selectionRef.current === controller) setSelecting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (autoStart) playAutomatically();
+    return () => selectionRef.current?.abort();
+  }, [autoStart, videoId]);
+
+  useEffect(() => { onSelectingChange?.(selecting); }, [selecting, onSelectingChange]);
 
   const playable = rows.filter(({ stream }) => safeURL(stream.url));
   const visible = filterStreams(playable, filters);
@@ -59,6 +127,14 @@ export function Sources({ addons, meta, videoId, onPlay }) {
 
   return (
     <VStack gap={4} className="sources">
+      <HStack gap={3} wrap="wrap" className="playback-actions" aria-label="Playback options">
+        <Button variant="primary" label="Play" icon={<NuvioPlayIcon size={16} />} onClick={playAutomatically} isLoading={selecting} />
+        <Button variant="secondary" label="Choose stream" onClick={chooseManually} />
+      </HStack>
+      {selectionStatus && <Text role="status" aria-live="polite" aria-busy={selecting}>{selectionStatus}</Text>}
+      {selecting && <Button variant="ghost" label="Cancel selection" onClick={chooseManually} />}
+      {!showPicker && !selecting && <Text type="supporting" color="secondary">Play checks a few sources and chooses one for your connection. Choose stream opens all sources.</Text>}
+      {showPicker && <>
       <HStack vAlign="center" hAlign="between" wrap="wrap" gap={2}>
         <Heading level={3}>Available Streams</Heading>
         <Text role="status" type="supporting" color="secondary">
@@ -237,6 +313,7 @@ export function Sources({ addons, meta, videoId, onPlay }) {
           {failed} addons timed out or did not respond.
         </Text>
       )}
+      </>}
     </VStack>
   );
 }

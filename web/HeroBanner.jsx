@@ -14,6 +14,7 @@ export function HeroBanner({
   item,
   layout = 'premiere',
   onPlay,
+  onChooseStream,
   onDetails,
   saved = [],
   isSaved: isSavedProp,
@@ -133,10 +134,11 @@ export function HeroBanner({
             <HStack gap={3} vAlign="center" wrap="wrap" className="hero-actions">
               <Button
                 variant="primary"
-                label="Choose stream"
+                label="Play"
                 icon={<NuvioPlayIcon size={16} />}
                 onClick={() => onPlay(active)}
               />
+              <Button variant="secondary" label="Choose stream" onClick={() => onChooseStream(active)} />
               <Button
                 variant="secondary"
                 label="Details"

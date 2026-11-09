@@ -127,7 +127,7 @@ test('playback gateway rejects upstream login HTML challenge with clean error',a
  const playRes=await fetch(base+streamRes.streams[0].url,{headers:identity});
  assert.equal(playRes.status,502);
  const err=await playRes.json();
- assert.match(err.error,/authentication/);
+ assert.match(err.error,/playable media/);
 });
 test('playback gateway rewrites HLS playlist segment URLs to proxy path',async t=>{
  const base=await fixture(t,{
@@ -150,6 +150,7 @@ test('playback gateway rewrites HLS playlist segment URLs to proxy path',async t
  const playRes=await fetch(base+streamRes.streams[0].url,{headers:identity});
  assert.equal(playRes.status,200);
  const text=await playRes.text();
- assert.ok(text.includes('/sub?url=https%3A%2F%2Fcdn.example%2Flive%2Fchunklist.m3u8'));
+ assert.match(text,/\/api\/playback\/[a-f0-9]{32}\/asset\/[a-f0-9]{24}/);
+ assert.ok(!text.includes('cdn.example'));
 });
 
