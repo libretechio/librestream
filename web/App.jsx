@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@astryxdesign/core/Button';
 import { Badge } from '@astryxdesign/core/Badge';
 import { Skeleton } from '@astryxdesign/core/Skeleton';
@@ -37,6 +37,16 @@ import {
 } from './Icons.jsx';
 import { DEFAULT_PREFERENCES, PALETTES, applyPaletteToDOM } from './palettes.js';
 import {
+  posterMetaLine,
+  certificationOf,
+  awardsBadge,
+  isNew,
+  episodeSummary,
+  runtimeLabel,
+  availabilityBadges,
+  readAvailabilityStore
+} from './badges.js';
+import {
   api,
   resource,
   supports,
@@ -54,62 +64,132 @@ function Message({ children }) {
   );
 }
 
-function PosterCard({ item, onOpen, shape = 'poster', inGrid = false }) {
+function PosterCard({
+  item,
+  onOpen,
+  shape = 'poster',
+  inGrid = false,
+  saved = false,
+  progress = 0,
+  availability = null,
+  onPlay
+}) {
   const [broken, setBroken] = useState(false);
   const rating = item.imdbRating || item.rating;
-  const certification = item.certification || item.ageRating || '';
-  const typeLabel = item.type === 'series' ? 'Series' : item.type === 'movie' ? 'Movie' : '';
+  const certification = certificationOf(item);
   const title = item.name || item.title || item.id;
-  const year = item.year || item.releaseInfo;
-  const metaLine = [year, typeLabel].filter(Boolean).join(' · ');
   const isLandscape = shape === 'landscape' && !inGrid;
   const imgUrl = isLandscape
     ? safeURL(item.background || item.banner || item.poster)
     : safeURL(item.poster || item.background);
   const logoUrl = isLandscape ? safeURL(item.logo) : '';
 
+  const metaLine = posterMetaLine(item);
+  const fresh = isNew(item);
+  const pct = Math.round(Math.min(100, Math.max(0, progress)));
+
+  // The strip carries quality, language count and cache. Hover reveals the rest.
+  const quality = availabilityBadges(availability);
+  const shown = quality.slice(0, 3);
+  const trimmed = quality.slice(3);
+  const langCount = availability?.languages?.length || 0;
+
   return (
-    <button
-      type="button"
+    <div
       className={`poster-card ${isLandscape ? 'poster-card-landscape' : 'poster-card-portrait'} ${
         inGrid ? 'poster-card-grid' : 'poster-card-rail'
       }`}
-      onClick={() => onOpen(item)}
-      aria-label={title}
       data-media-id={item.id}
     >
-      <div className="poster-media-box">
-        {!broken && imgUrl ? (
-          <img
-            className="poster-image"
-            src={imgUrl}
-            alt=""
-            loading="lazy"
-            onError={() => setBroken(true)}
-          />
-        ) : (
-          <div className="poster-placeholder">
-            <Icon icon={Clapperboard} size="lg" color="secondary" />
-          </div>
-        )}
+      <div className="poster-art-wrap">
+        <button
+          type="button"
+          className="poster-hit"
+          onClick={() => onOpen(item)}
+          aria-label={`${title}${metaLine ? ', ' + metaLine : ''}`}
+        >
+          <div className="poster-media-box">
+            {!broken && imgUrl ? (
+              <img
+                className="poster-image"
+                src={imgUrl}
+                alt=""
+                loading="lazy"
+                onError={() => setBroken(true)}
+              />
+            ) : (
+              <div className="poster-placeholder">
+                <Icon icon={Clapperboard} size="lg" color="secondary" />
+              </div>
+            )}
 
-        {certification && <span className="poster-badge-top-right">{certification}</span>}
-        {rating && (
-          <span className="poster-badge-bottom">
-            <span className="poster-star">★</span>
-            {Number(rating) ? Number(rating).toFixed(1) : rating}
-          </span>
-        )}
-        {isLandscape && logoUrl && (
-          <img src={logoUrl} alt="" className="poster-landscape-logo" />
+            <div className="poster-badges-top">
+              {certification && <span className="poster-badge">{certification}</span>}
+              {fresh && <span className="poster-badge is-new">New</span>}
+            </div>
+
+            {rating && (
+              <span className="poster-badge is-rating">
+                <span className="poster-star">★</span>
+                {Number(rating) ? Number(rating).toFixed(1) : rating}
+              </span>
+            )}
+
+            {isLandscape && logoUrl && (
+              <img src={logoUrl} alt="" className="poster-landscape-logo" />
+            )}
+
+            {pct > 0 && (
+              <div className="poster-progress" aria-hidden="true">
+                <div style={{ width: `${pct}%` }} />
+              </div>
+            )}
+
+            {trimmed.length > 0 && (
+              <div className="poster-reveal" aria-hidden="true">
+                {trimmed.map((badge) => (
+                  <span key={badge} className="poster-badge is-quality">
+                    {badge}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </button>
+
+        {onPlay && (
+          <button
+            type="button"
+            className="poster-quick-play"
+            aria-label={`Play ${title}`}
+            title="Play best source"
+            onClick={(event) => {
+              event.stopPropagation();
+              onPlay(item);
+            }}
+          >
+            <NuvioPlayIcon size={15} />
+          </button>
         )}
       </div>
 
-      <div className="poster-info">
+      <button type="button" className="poster-caption" onClick={() => onOpen(item)}>
         <span className="poster-title">{title}</span>
         {metaLine && <span className="poster-sub">{metaLine}</span>}
-      </div>
-    </button>
+        {(shown.length > 0 || langCount > 0 || saved) && (
+          <span className="poster-strip">
+            {shown.map((badge) => (
+              <i key={badge} className="poster-chip is-quality">
+                {badge}
+              </i>
+            ))}
+            {langCount > 0 && <i className="poster-chip">{langCount} lang</i>}
+            {availability?.cached > 0 && <i className="poster-chip is-cache">cached</i>}
+            {saved && <i className="poster-chip is-saved">saved</i>}
+          </span>
+        )}
+      </button>
+    </div>
   );
 }
 
@@ -177,7 +257,11 @@ function Shelf({
   onOpen,
   onViewAll,
   shape = 'poster',
-  grid = false
+  grid = false,
+  savedIds,
+  progressMap,
+  availabilityStore,
+  onPlay
 }) {
   if (!items || !items.length) return null;
   return (
@@ -211,6 +295,13 @@ function Shelf({
               onOpen={onOpen}
               shape="poster"
               inGrid
+              saved={savedIds?.has((item.type || 'movie') + ':' + item.id)}
+              progress={progressMap?.[(item.type || 'movie') + ':' + item.id]?.position
+                ? (progressMap[(item.type || 'movie') + ':' + item.id].position /
+                    (progressMap[(item.type || 'movie') + ':' + item.id].duration || 1)) * 100
+                : 0}
+              availability={availabilityStore?.[item.type + ':' + item.id]}
+              onPlay={onPlay}
             />
           ))}
         </div>
@@ -222,6 +313,13 @@ function Shelf({
               item={item}
               onOpen={onOpen}
               shape={shape}
+              saved={savedIds?.has((item.type || 'movie') + ':' + item.id)}
+              progress={progressMap?.[(item.type || 'movie') + ':' + item.id]?.position
+                ? (progressMap[(item.type || 'movie') + ':' + item.id].position /
+                    (progressMap[(item.type || 'movie') + ':' + item.id].duration || 1)) * 100
+                : 0}
+              availability={availabilityStore?.[item.type + ':' + item.id]}
+              onPlay={onPlay}
             />
           ))}
         </ScrollRow>
@@ -281,7 +379,7 @@ function ContinueWatchingShelf({ items, onOpen }) {
   );
 }
 
-function Catalog({ addon, catalog, shape, onOpen, onViewAll, onFeaturedItems }) {
+function Catalog({ addon, catalog, shape, onOpen, onViewAll, onFeaturedItems, savedIds, progressMap, availabilityStore, onPlay }) {
   const ref = useRef(null);
   const [visible, setVisible] = useState(false);
   const [data, setData] = useState(null);
@@ -339,6 +437,10 @@ function Catalog({ addon, catalog, shape, onOpen, onViewAll, onFeaturedItems }) 
           shape={shape}
           onOpen={onOpen}
           onViewAll={() => onViewAll({ title: label, subtitle: addon.name, items: data })}
+          savedIds={savedIds}
+          progressMap={progressMap}
+          availabilityStore={availabilityStore}
+          onPlay={onPlay}
         />
       ) : (
         <section className="shelf" aria-busy={visible && !error}>
@@ -463,7 +565,16 @@ function Search({ addons, onOpen }) {
         {failed && <Message>Some addon catalogs did not respond.</Message>}
         {busy && <Message>Searching across {addons.length} addons…</Message>}
         {items?.length ? (
-          <Shelf title={`Results (${items.length})`} items={items} grid onOpen={onOpen} />
+          <Shelf
+            title={`Results (${items.length})`}
+            items={items}
+            grid
+            savedIds={savedIds}
+            progressMap={progressMap}
+            availabilityStore={availabilityStore}
+            onOpen={onOpen}
+            onPlay={onPlay}
+          />
         ) : items ? (
           <Message>No matches found. Try another title.</Message>
         ) : (
@@ -476,11 +587,27 @@ function Search({ addons, onOpen }) {
   );
 }
 
+function useMediaQuery(query) {
+  const [matches, setMatches] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(query).matches
+  );
+  useEffect(() => {
+    const list = window.matchMedia(query);
+    const sync = () => setMatches(list.matches);
+    sync();
+    list.addEventListener('change', sync);
+    return () => list.removeEventListener('change', sync);
+  }, [query]);
+  return matches;
+}
+
 function TitleDialog({ item, addons, saved, onSave, onPlayStream, onClose, autoStart = false, initialPicker = false, addonsLoading = false }) {
+  const wide = useMediaQuery('(min-width: 48rem)');
   const [selectingStream, setSelectingStream] = useState(false);
   const [meta, setMeta] = useState(item);
   const [loading, setLoading] = useState(true);
   const [season, setSeason] = useState('');
+  const [tab, setTab] = useState('episodes');
   const [autoPlayId, setAutoPlayId] = useState(null);
   const [selected, setSelected] = useState(
     item.playbackId ? { id: item.playbackId, playbackTitle: item.playbackTitle } : item.type !== 'series' ? { id: item.id } : null
@@ -523,214 +650,267 @@ function TitleDialog({ item, addons, saved, onSave, onPlayStream, onClose, autoS
   const isSaved = saved.some((s) => s.type === meta.type && s.id === meta.id);
   const movie = meta.type !== 'series' && !episodes.length;
   const backdrop = safeURL(meta.background || meta.banner || meta.poster);
+  const poster = safeURL(meta.poster || meta.background);
   const logo = safeURL(meta.logo);
   const rating = meta.imdbRating || meta.rating;
   const cast = Array.isArray(meta.cast) ? meta.cast.slice(0, 6) : [];
+  const title = meta.name || meta.title || meta.id;
+  const certification = certificationOf(meta);
+  const awards = awardsBadge(meta.awards);
+  const runtime = runtimeLabel(meta.runtime);
+
+  const facts = (
+    <div className="detail-facts">
+      {rating && <ImdbBadge rating={rating} size="sm" />}
+      {(meta.releaseInfo || meta.year) && (
+        <span className="detail-fact">{meta.releaseInfo || meta.year}</span>
+      )}
+      {runtime && <span className="detail-fact">{runtime}</span>}
+      {certification && <span className="detail-fact is-boxed">{certification}</span>}
+      {awards && <span className="detail-fact is-accent">{awards}</span>}
+      {meta.type === 'series' && episodes.length > 0 && (
+        <span className="detail-fact">{episodeSummary(episodes)}</span>
+      )}
+    </div>
+  );
+
+  const actions = (
+    <div className="detail-actions">
+      {selected && (
+        <button
+          type="button"
+          className="detail-btn is-primary"
+          onClick={() => {
+            setAutoPlayId(selected.id);
+            if (!wide) setTab('streams');
+          }}
+        >
+          <NuvioPlayIcon size={15} />
+          {movie ? 'Play' : 'Play episode'}
+        </button>
+      )}
+      <button
+        type="button"
+        className="detail-btn"
+        onClick={() => {
+          setAutoPlayId(null);
+          setTab('streams');
+          if (!selected) setSelected({ id: meta.id });
+        }}
+      >
+        Choose stream
+      </button>
+      <button
+        type="button"
+        className="detail-btn is-ghost"
+        aria-pressed={isSaved}
+        onClick={() => onSave(meta)}
+      >
+        <Icon icon={isSaved ? BookmarkCheck : Bookmark} size="sm" />
+        {isSaved ? 'Saved' : 'Watchlist'}
+      </button>
+    </div>
+  );
+
+  const overview = (
+    <>
+      <p className="detail-synopsis">{meta.description || meta.synopsis || 'No description available.'}</p>
+      {cast.length > 0 && (
+        <div className="detail-cast-row">
+          <span className="detail-cast-label">Cast</span>
+          {cast.map((person) => (
+            <span key={person} className="detail-cast-chip">{person}</span>
+          ))}
+        </div>
+      )}
+      {(meta.genres || []).length > 0 && (
+        <div className="detail-cast-row">
+          <span className="detail-cast-label">Genre</span>
+          {meta.genres.map((g) => (
+            <span key={g} className="detail-cast-chip">{g}</span>
+          ))}
+        </div>
+      )}
+    </>
+  );
+
+  const episodeList = !movie && (
+    <div className="episode-block">
+      <div className="episode-block-head">
+        <h3>Episodes</h3>
+        {seasons.length > 1 && (
+          <div className="season-tabs" role="tablist" aria-label="Season">
+            {seasons.map((value) => (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                aria-selected={activeSeason === value}
+                className={activeSeason === value ? 'is-active' : ''}
+                onClick={() => {
+                  setSeason(value);
+                  setSelected(null);
+                }}
+              >
+                {value === '0' ? 'Specials' : `S${value}`}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="episode-list">
+        {episodes
+          .filter((v) => String(v.season ?? 0) === activeSeason)
+          .map((v) => {
+            const isEpSelected = selected?.id === v.id;
+            const thumb = safeURL(v.thumbnail || meta.background || meta.poster);
+            const epTitle = v.title || v.name || `Episode ${v.episode || ''}`;
+            const episodeEntry = {
+              ...v,
+              playbackTitle: `${title} · S${v.season || 1}:E${v.episode || 1}`
+            };
+            return (
+              <div key={v.id} className={`episode-row ${isEpSelected ? 'is-active' : ''}`}>
+                <button
+                  type="button"
+                  className="episode-main"
+                  aria-pressed={isEpSelected}
+                  onClick={() => {
+                    setSelected(episodeEntry);
+                    setAutoPlayId(null);
+                  }}
+                >
+                  {thumb && (
+                    <span className="episode-thumb-box">
+                      <img src={thumb} alt="" className="episode-thumb-img" loading="lazy" />
+                      <span className="episode-num-pill">
+                        S{v.season || 1}·E{v.episode || 1}
+                      </span>
+                    </span>
+                  )}
+                  <span className="episode-info-box">
+                    <span className="episode-title-text">{epTitle}</span>
+                    {v.overview && <span className="episode-overview-text">{v.overview}</span>}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="episode-play-btn"
+                  aria-label={`Play episode ${v.episode || ''} ${epTitle}`}
+                  title="Play this episode"
+                  onClick={() => {
+                    setSelected(episodeEntry);
+                    setAutoPlayId(v.id);
+                    if (!wide) setTab('streams');
+                  }}
+                >
+                  <NuvioPlayIcon size={15} />
+                </button>
+              </div>
+            );
+          })}
+      </div>
+    </div>
+  );
+
+  const sources = selected && (
+    <Sources
+      addons={addons}
+      meta={{ ...meta, runtime: selected.runtime || meta.runtime }}
+      videoId={selected.id}
+      autoStart={autoStart || autoPlayId === selected.id}
+      initialPicker={initialPicker}
+      showActions={!wide}
+      onSelectingChange={setSelectingStream}
+      addonsLoading={addonsLoading}
+      onPlay={(streamObj, selection) =>
+        onPlayStream(streamObj, {
+          ...meta,
+          playbackId: selected.id,
+          playbackTitle: selected.playbackTitle
+        }, selection)
+      }
+    />
+  );
 
   return (
     <Dialog
-      className="title-dialog"
+      className={`title-dialog ${wide ? 'is-wide' : 'is-narrow'}`}
       isOpen
       onOpenChange={(open) => {
         if (!open) onClose();
       }}
-      width="var(--ls-detail-width)"
+      width={wide ? 'var(--ls-detail-width)' : 'min(100vw, 34rem)'}
       maxHeight="92dvh"
-      padding={4}
+      padding={0}
     >
       <DialogHeader
-        title={meta.name || meta.title || meta.id}
+        title={title}
         onOpenChange={(open) => {
           if (!open) onClose();
         }}
       />
-      {selectingStream && <Text type="supporting" color="secondary">Checking sources for your connection. Close this panel to cancel.</Text>}
-      <VStack className="dialog-scroll" gap={4}>
-        {/* Nuvio DetailHero Banner */}
-        <div
-          className="detail-hero-card"
-          style={{
-            backgroundImage: backdrop ? `url(${backdrop})` : 'none'
-          }}
-        >
-          <div className="detail-hero-scrim" />
-          <div className="detail-hero-content">
-            {logo ? (
-              <img src={logo} alt={meta.name || ''} className="detail-clearlogo" />
-            ) : (
-              <Heading level={2} className="detail-hero-title">
-                {meta.name || meta.title || meta.id}
-              </Heading>
-            )}
-            <div className="hero-meta-facts">
-              {rating && <ImdbBadge rating={rating} size="sm" />}
-              {(meta.releaseInfo || meta.year) && (
-                <span className="hero-fact-item">{meta.releaseInfo || meta.year}</span>
-              )}
-              {meta.runtime && (
-                <>
-                  <span className="hero-fact-dot" />
-                  <span className="hero-fact-item">{meta.runtime}</span>
-                </>
-              )}
-              {(meta.genres || []).slice(0, 3).map((g) => (
-                <span key={g} className="hero-pill-subtle">
-                  {g}
-                </span>
-              ))}
-            </div>
+      {selectingStream && (
+        <Text type="supporting" color="secondary" className="dialog-status">
+          Checking sources for your connection. Close this panel to cancel.
+        </Text>
+      )}
+
+      {wide ? (
+        <div className="dialog-scroll detail-wide">
+          <div className="detail-aside">
+            {poster && <img src={poster} alt="" className="detail-poster" />}
+            {facts}
+            {actions}
+          </div>
+          <div className="detail-main">
+            {overview}
+            {loading && <Message>Loading full metadata…</Message>}
+            {episodeList}
+            {sources}
           </div>
         </div>
-
-        <VStack gap={3} className="title-body">
-          <Text as="p">
-            {meta.description || meta.synopsis || 'No description available.'}
-          </Text>
-
-          {cast.length > 0 && (
-            <div className="detail-cast-row">
-              <span className="detail-cast-label">Cast:</span>
-              {cast.map((person) => (
-                <span key={person} className="detail-cast-chip">
-                  {person}
-                </span>
-              ))}
+      ) : (
+        <div className="dialog-scroll detail-narrow">
+          <div
+            className="detail-banner"
+            style={{ backgroundImage: backdrop ? `url(${backdrop})` : 'none' }}
+          >
+            <div className="detail-banner-scrim" />
+            <div className="detail-banner-body">
+              {logo ? <img src={logo} alt="" className="detail-clearlogo" /> : <h2>{title}</h2>}
+              {facts}
             </div>
-          )}
-
-          <HStack gap={3} wrap="wrap">
-            <Button
-              variant="secondary"
-              icon={<Icon icon={isSaved ? BookmarkCheck : Bookmark} />}
-              label={isSaved ? 'Remove from Watchlist' : 'Add to Watchlist'}
-              onClick={() => onSave(meta)}
-              aria-pressed={isSaved}
-            />
-          </HStack>
-
-          {loading && <Message>Loading full metadata…</Message>}
-
-          {!movie && (
-            <VStack gap={3} className="series-episodes-block">
-              <HStack vAlign="center" hAlign="between" wrap="wrap" gap={2}>
-                <HStack gap={2} vAlign="center">
-                  <NuvioEpisodesIcon size={18} />
-                  <Heading level={3}>Episodes</Heading>
-                </HStack>
-                <Selector
-                  label="Season"
-                  presentation="adaptive"
-                  value={activeSeason}
-                  onChange={(value) => {
-                    setSeason(value);
-                    setSelected(null);
-                  }}
-                  options={seasons.map((value) => ({
-                    value,
-                    label: value === '0' ? 'Specials' : `Season ${value}`
-                  }))}
-                />
-              </HStack>
-
-              {/* Quick season pill tabs */}
-              {seasons.length > 1 && (
-                <div className="nuvio-stream-chips" role="tablist" aria-label="Seasons">
-                  {seasons.map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      role="tab"
-                      aria-selected={activeSeason === s}
-                      className={`nuvio-chip ${activeSeason === s ? 'active' : ''}`}
-                      onClick={() => {
-                        setSeason(s);
-                        setSelected(null);
-                      }}
-                    >
-                      {s === '0' ? 'Specials' : `Season ${s}`}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <div className="nuvio-episodes-list">
-                {episodes
-                  .filter((v) => String(v.season ?? 0) === activeSeason)
-                  .map((v) => {
-                    const isEpSelected = selected?.id === v.id;
-                    const thumb = safeURL(v.thumbnail || meta.background || meta.poster);
-                    const epTitle = v.title || v.name || `Episode ${v.episode || ''}`;
-                    const episodeEntry = {
-                      ...v,
-                      playbackTitle: `${meta.name || meta.title} · S${v.season || 1}:E${v.episode || 1}`
-                    };
-                    return (
-                      <div key={v.id} className={`nuvio-episode-card ${isEpSelected ? 'active' : ''}`}>
-                        <button
-                          type="button"
-                          className="episode-main"
-                          aria-pressed={isEpSelected}
-                          onClick={() => {
-                            setSelected(episodeEntry);
-                            setAutoPlayId(null);
-                          }}
-                        >
-                          {thumb && (
-                            <span className="episode-thumb-box">
-                              <img src={thumb} alt="" className="episode-thumb-img" loading="lazy" />
-                              <span className="episode-num-pill">
-                                S{v.season || 1} · E{v.episode || 1}
-                              </span>
-                            </span>
-                          )}
-                          <span className="episode-info-box">
-                            <span className="episode-title-text">
-                              Episode {v.episode || ''} · {epTitle}
-                            </span>
-                            {v.overview && (
-                              <span className="episode-overview-text">{v.overview}</span>
-                            )}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          className="episode-play-btn"
-                          aria-label={`Play episode ${v.episode || ''} ${epTitle}`}
-                          title="Play this episode"
-                          onClick={() => {
-                            setSelected(episodeEntry);
-                            setAutoPlayId(v.id);
-                          }}
-                        >
-                          <NuvioPlayIcon size={16} />
-                        </button>
-                      </div>
-                    );
-                  })}
-              </div>
-            </VStack>
-          )}
-
-          {selected && (
-            <Sources
-              addons={addons}
-              meta={{ ...meta, runtime: selected.runtime || meta.runtime }}
-              videoId={selected.id}
-              autoStart={autoStart || autoPlayId === selected.id}
-              initialPicker={initialPicker}
-              onSelectingChange={setSelectingStream}
-              addonsLoading={addonsLoading}
-              onPlay={(streamObj, selection) =>
-                onPlayStream(streamObj, {
-                  ...meta,
-                  playbackId: selected.id,
-                  playbackTitle: selected.playbackTitle
-                }, selection)
-              }
-            />
-          )}
-        </VStack>
-      </VStack>
+          </div>
+          {actions}
+          <div className="detail-tabs" role="tablist">
+            {[
+              ['episodes', 'Episodes', !movie],
+              ['overview', 'Overview', true],
+              ['streams', 'Streams', Boolean(selected)]
+            ]
+              .filter(([, , show]) => show)
+              .map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === id}
+                  className={tab === id ? 'is-active' : ''}
+                  onClick={() => setTab(id)}
+                >
+                  {label}
+                </button>
+              ))}
+          </div>
+          <div className="detail-pane">
+            {tab === 'episodes' && episodeList}
+            {tab === 'overview' && overview}
+            {tab === 'streams' && sources}
+            {tab === 'episodes' && movie && overview}
+          </div>
+        </div>
+      )}
     </Dialog>
   );
 }
@@ -757,6 +937,13 @@ export function App({ onThemeChange }) {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [preferences, setPreferences] = useState(DEFAULT_PREFERENCES);
   const [collectionFilter, setCollectionFilter] = useState('all');
+  const [availabilityStore, setAvailabilityStore] = useState(() => readAvailabilityStore());
+
+  const savedIds = useMemo(
+    () => new Set(saved.map((entry) => (entry.type || 'movie') + ':' + entry.id)),
+    [saved]
+  );
+  const refreshAvailability = () => setAvailabilityStore(readAvailabilityStore());
 
   async function boot() {
     setError('');
@@ -849,6 +1036,7 @@ export function App({ onThemeChange }) {
   };
 
   const startPlayback = (streamObj, mediaMeta, selection) => {
+    refreshAvailability();
     setAlternatives(selection?.alternatives || []);
     setActiveStream(streamObj);
     setPlayingMeta(mediaMeta);
@@ -1023,7 +1211,17 @@ export function App({ onThemeChange }) {
             <h1 className="page-title">Saved</h1>
             {saved.length ? (
               <div className="shelf shelf-inline">
-                <Shelf title="Watchlist" subtitle={`${saved.length} saved`} items={saved} grid onOpen={openTitle} />
+                <Shelf
+                  title="Watchlist"
+                  subtitle={`${saved.length} saved`}
+                  items={saved}
+                  grid
+                  savedIds={savedIds}
+                  progressMap={progress}
+                  availabilityStore={availabilityStore}
+                  onOpen={openTitle}
+                  onPlay={(target) => openTitle(target, 'auto')}
+                />
               </div>
             ) : (
               <p className="empty-note">
@@ -1161,6 +1359,10 @@ export function App({ onThemeChange }) {
                 onOpen={openTitle}
                 onViewAll={setExpandedCatalog}
                 onFeaturedItems={idx < 3 ? handleFeaturedItems : undefined}
+                savedIds={savedIds}
+                progressMap={progress}
+                availabilityStore={availabilityStore}
+                onPlay={(target) => openTitle(target, 'auto')}
               />
             ))}
           </VStack>
@@ -1189,6 +1391,13 @@ export function App({ onThemeChange }) {
               title={expandedCatalog.subtitle || 'All titles'}
               items={expandedCatalog.items}
               grid
+              savedIds={savedIds}
+              progressMap={progress}
+              availabilityStore={availabilityStore}
+              onPlay={(target) => {
+                setExpandedCatalog(null);
+                openTitle(target, 'auto');
+              }}
               onOpen={(picked) => {
                 setExpandedCatalog(null);
                 openTitle(picked);
@@ -1210,7 +1419,10 @@ export function App({ onThemeChange }) {
           onPlayStream={startPlayback}
           autoStart={playbackIntent === 'auto'}
           initialPicker={playbackIntent === 'choose'}
-          onClose={() => setItem(null)}
+          onClose={() => {
+            setItem(null);
+            refreshAvailability();
+          }}
         />
       )}
 

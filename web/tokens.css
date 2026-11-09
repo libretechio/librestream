@@ -14,10 +14,10 @@
   --ls-10: 2.5rem;
   --ls-12: 3rem;
 
-  /* radius — four steps, nothing else */
+  /* radius — S2 Soft: artwork 10, controls 8, badges 4, panels 12 */
   --ls-radius-sm: 4px;
-  --ls-radius: 6px;
-  --ls-radius-md: 8px;
+  --ls-radius: 8px;
+  --ls-radius-md: 10px;
   --ls-radius-lg: 12px;
 
   /* type */
@@ -42,9 +42,15 @@
 
   /* ink */
   --ls-ink: var(--color-text-primary);
+  /* numerals, badges, timecodes */
+  --ls-num: var(--font-family-num, var(--font-family-body));
   --ls-ink-2: var(--color-text-secondary);
   /* Tertiary ink stays opaque so it never inherits the surface alpha. */
   --ls-ink-3: color-mix(in srgb, var(--color-text-secondary) 88%, var(--color-background-body));
+
+  /* one soft elevation, used only where an object lifts off the page */
+  --ls-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+  --ls-shadow-lift: 0 14px 30px rgba(0, 0, 0, 0.5);
 
   /* accent — primary action, active state, focus ring. Nothing else. */
   --ls-accent: var(--color-accent);

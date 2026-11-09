@@ -24,6 +24,30 @@
   font-display: swap;
 }
 
+:root[data-palette="oxblood"],
+:root[data-palette="oxblood"] [data-astryx-theme],
+:root[data-palette="oxblood"] [data-astryx-media] {
+  --color-background-body: #120d0d;
+  --color-background-surface: #1a1414;
+  --color-background-card: #231a1a;
+  --color-background-popover: #2b2020;
+  --color-background-muted: #161010;
+  --color-accent: var(--ls-accent, #c0524a);
+  --color-on-accent: var(--ls-on-accent, #ffffff);
+  --color-accent-muted: rgba(192, 82, 74, 0.30);
+  --color-text-primary: #f7ecea;
+  --color-text-secondary: #c9a5a0;
+  --color-text-accent: var(--ls-accent, #c0524a);
+  --color-icon-primary: #f7ecea;
+  --color-icon-secondary: #c9a5a0;
+  --color-icon-accent: var(--ls-accent, #c0524a);
+  --color-border: rgba(247, 236, 234, 0.11);
+  --color-border-emphasized: rgba(247, 236, 234, 0.24);
+  --ls-accent: #c0524a;
+  --ls-accent-secondary: #d97b70;
+  --ls-ambient-glow: rgba(192, 82, 74, 0.20);
+}
+
 :root,
 :root[data-palette="nuvio-gold"],
 :root[data-palette="nuvio-gold"] [data-astryx-theme],

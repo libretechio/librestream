@@ -1,5 +1,15 @@
 export const FONT_PRESETS = [
   {
+    id: 'oxblood',
+    name: 'Figtree + JetBrains',
+    badge: 'Figtree / JBSans',
+    description: 'Figtree for titles and interface, JetBrains Sans for numerals, badges and timecodes',
+    heading: '"Figtree Variable", "JBSans", system-ui, sans-serif',
+    body: '"Figtree Variable", "JBSans", system-ui, sans-serif',
+    numeric: '"JBSans", "JetBrains Sans", system-ui, sans-serif',
+    code: '"JetBrains Mono Variable", monospace'
+  },
+  {
     id: 'nuvio',
     name: 'Nuvio Sans',
     badge: 'JetBrains Sans',
@@ -38,6 +48,31 @@ export const FONT_PRESETS = [
 ];
 
 export const PALETTES = [
+  {
+    id: 'oxblood',
+    name: 'Oxblood',
+    category: 'LibreStream',
+    astryxTheme: 'chocolate',
+    mode: 'dark',
+    defaultFont: 'oxblood',
+    description: 'Cinema red on warm near-black. Artwork first, one accent, no decoration',
+    swatches: ['#120d0d', '#231a1a', '#c0524a', '#f7ecea'],
+    accent: '#c0524a',
+    accentSecondary: '#d97b70',
+    onAccent: '#ffffff',
+    tokens: {
+      body: '#120d0d',
+      surface: '#1a1414',
+      card: '#231a1a',
+      popover: '#2b2020',
+      muted: '#161010',
+      textPrimary: '#f7ecea',
+      textSecondary: '#c9a5a0',
+      border: 'rgba(247, 236, 234, 0.11)',
+      borderEmphasized: 'rgba(247, 236, 234, 0.24)',
+      glow: 'rgba(192, 82, 74, 0.20)'
+    },
+  },
   {
     id: 'nuvio-gold',
     name: 'Nuvio Gold',
@@ -470,9 +505,9 @@ export const DEFAULT_PREFERENCES = {
   layout: 'premiere',
   posterShape: 'poster',
   player: 'compact',
-  palette: 'nuvio-gold',
-  accent: '#e8a91c',
-  font: 'nuvio'
+  palette: 'oxblood',
+  accent: '#c0524a',
+  font: 'oxblood'
 };
 
 export function applyPaletteToDOM(prefs = DEFAULT_PREFERENCES) {
@@ -511,7 +546,8 @@ export function applyPaletteToDOM(prefs = DEFAULT_PREFERENCES) {
     '--color-border-emphasized': t.borderEmphasized,
     '--font-family-heading': fontObj.heading,
     '--font-family-body': fontObj.body,
-    '--font-family-code': fontObj.code
+    '--font-family-code': fontObj.code,
+    '--font-family-num': fontObj.numeric || fontObj.body
   };
 
   const targets = [

@@ -1,5 +1,47 @@
 # LibreStream validation
 
+## Approved design pass — Oxblood (2026-11-09, local only)
+
+Ten decisions were taken from the user, each from a rendered mockup, before any app code changed. Mockups live in `mockups/` next to this file.
+
+| Decision | Chosen |
+|---|---|
+| Direction | A — Editorial Cinema (artwork first, quiet chrome) |
+| Poster info | Corners for certification and rating; data strip under the artwork for quality, language count, cache |
+| Typography | Figtree for titles and UI, JetBrains Sans for numerals and badges |
+| Palette | Oxblood — `#c0524a` on `#120d0d` |
+| Shape | S2 Soft — 10px artwork, 8px controls, 4px badges, one soft shadow |
+| Hero | H1 full-bleed |
+| Title panel | D2 two-column on desktop, D3 tabbed on phone |
+| Poster strip | Quality + language count + cached |
+| Hover | Lift 2px, accent border, artwork zooms 3%, reveals Play and the trimmed badges |
+| Phone navigation | Bottom bar with a filled active pill |
+
+Implemented
+- `web/palettes.js`: Oxblood palette added and made the default; new `oxblood` font preset carrying a `numeric` face, exposed as `--font-family-num`; `DEFAULT_PREFERENCES` point at both.
+- `web/palettes.css`: Oxblood token block so the palette applies before JS runs.
+- `web/tokens.css`: radius scale is now 4 / 8 / 10 / 12, plus `--ls-num` and a single elevation pair.
+- `web/badges.js` (new, 9 unit tests): runtime parsing, New badge from a real release date only, episode counts, awards, certification, language extraction from provider flags, and `availabilityFromStreams` for quality/HDR/DV/Atmos/REMUX/cache/languages.
+- Poster card: certification + New top-left, rating top-right, progress bar, and a caption carrying title, `year · type · runtime` and the data strip. Hover reveals Play and the badges trimmed from the strip. Touch devices always show Play.
+- Availability is remembered per title in `localStorage` after its streams load, so the strip fills in without extra requests. No language or quality is invented: an unopened title shows only what its catalogue entry actually contains.
+- Title panel: `useMediaQuery` picks D2 (poster column + facts + actions + episodes + sources) or D3 (banner, actions, Episodes/Overview/Streams tabs).
+- Phone navigation: filled accent pill behind the active icon.
+
+Fixed on the way: the app crashed to a blank page twice during this pass (`useMemo is not defined`, then `ScrollRow is not defined`) after two of my edits removed or failed to import symbols. Both were caught by reading the console, not by the build, which had passed.
+
+Measured in the browser (Chromium, local preview, real addons)
+- Palette `oxblood`, heading font Figtree, numerals JetBrains Sans, artwork radius 10px, shadow present.
+- 96 poster cards on the home route; each has a hover Play control; strip renders `4K · DV · Atmos · 8 lang · cached` for a title whose streams had been read, with 3 more badges behind hover.
+- Contrast on Oxblood: poster title 14.7, poster sub 7.59, quality chip 19.28, shelf heading 16.66, hero synopsis 8.12.
+- Desktop title panel: two columns (184px poster + content), Play / Choose stream / Watchlist, no duplicated action row.
+- Phone title panel: tabbed layout, actions above the tabs.
+- Build and 60 tests pass.
+
+Not verified
+- Human visual review. I cannot see images, so every check here is geometry, computed style and contrast; the mockups were rendered and measured, not looked at.
+- Safari and iOS.
+- Production. Nothing pushed, merged or deployed for this pass.
+
 ## Interface system pass (2026-11-09, local only)
 
 Scope: the whole interface, not only the player. Header, navigation, hero, shelves, posters, continue watching, title dialog, episodes, sources, appearance and settings were rebuilt on one token layer.

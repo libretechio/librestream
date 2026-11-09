@@ -12,6 +12,7 @@ import { NuvioPlayIcon, BoltIcon } from './Icons.jsx';
 import { resource, supports, safeURL, sourceLabel } from './api';
 import { streamInfo, filterStreams, parseStreamMeta } from './streams';
 import { selectBestStream, waitForSources } from './autoSelect.js';
+import { availabilityFromStreams, rememberAvailability } from './badges.js';
 
 // Rankings are warmed as soon as sources arrive, so Play does not start the probing.
 const rankCache = new Map();
@@ -53,7 +54,7 @@ function rankSources(key, rows, meta, onStatus) {
   return pending;
 }
 
-export function Sources({ addons, meta, videoId, onPlay, autoStart = false, initialPicker = false, onSelectingChange, addonsLoading = false }) {
+export function Sources({ addons, meta, videoId, onPlay, autoStart = false, initialPicker = false, onSelectingChange, addonsLoading = false, showActions = true }) {
   const [rows, setRows] = useState([]);
   const [pending, setPending] = useState(0);
   const [failed, setFailed] = useState(0);
@@ -183,6 +184,13 @@ export function Sources({ addons, meta, videoId, onPlay, autoStart = false, init
 
   useEffect(() => { onSelectingChange?.(selecting); }, [selecting, onSelectingChange]);
 
+  // Remember what the providers actually offer, so the poster can show it later.
+  useEffect(() => {
+    if (pending > 0 || !rows.length) return;
+    const key = (meta.type || 'movie') + ':' + meta.id;
+    rememberAvailability(key, availabilityFromStreams(rows.map((row) => row.stream)));
+  }, [pending, rows, meta.id, meta.type]);
+
   const playable = rows.filter(({ stream }) => safeURL(stream.url));
   const visible = filterStreams(playable, filters);
   const unsupported = rows.length - playable.length;
@@ -195,10 +203,12 @@ export function Sources({ addons, meta, videoId, onPlay, autoStart = false, init
 
   return (
     <VStack gap={4} className="sources">
-      <HStack gap={3} wrap="wrap" className="playback-actions" aria-label="Playback options">
-        <Button variant="primary" label="Play" icon={<NuvioPlayIcon size={16} />} onClick={playAutomatically} isLoading={selecting} />
-        <Button variant="secondary" label="Choose stream" onClick={chooseManually} />
-      </HStack>
+      {showActions && (
+        <HStack gap={3} wrap="wrap" className="playback-actions" aria-label="Playback options">
+          <Button variant="primary" label="Play" icon={<NuvioPlayIcon size={16} />} onClick={playAutomatically} isLoading={selecting} />
+          <Button variant="secondary" label="Choose stream" onClick={chooseManually} />
+        </HStack>
+      )}
       {selectionStatus && <Text role="status" aria-live="polite" aria-busy={selecting}>{selectionStatus}</Text>}
       {selecting && <Button variant="ghost" label="Cancel selection" onClick={chooseManually} />}
       {!selectionStatus && rankState === 'ranking' && (
