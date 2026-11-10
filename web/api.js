@@ -1,3 +1,5 @@
+import { readState as readProfileState, saveState as saveProfileState } from './profile.js';
+
 export async function api(path, signal) {
   const response = await fetch(path, { signal, credentials: 'same-origin' });
   if (response.status === 401) throw Error('Your session has ended. Reload to sign in.');
@@ -41,16 +43,11 @@ export function safeURL(value) {
 }
 
 export function readState(uid, name, fallback) {
-  try {
-    return JSON.parse(localStorage.getItem('librestream:' + uid + ':' + name)) || fallback;
-  } catch {
-    return fallback;
-  }
+  return readProfileState(name, fallback);
 }
 
+// Writes go to the server-backed profile, with the browser as a cache.
 export function writeState(uid, name, value) {
-  try {
-    localStorage.setItem('librestream:' + uid + ':' + name, JSON.stringify(value));
-  } catch {}
+  saveProfileState(name, value);
 }
 

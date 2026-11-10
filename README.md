@@ -30,16 +30,25 @@ Production must:
 - Keep the application reachable only behind the trusted Authentik proxy.
 - Strip incoming client identity headers and inject `X-Authentik-Uid`, `X-Authentik-Username` and `X-Authentik-Name` from the authenticated session.
 - Mount the addon registry read-only as a Kubernetes Secret and set `LIBRESTREAM_ADDONS_FILE`.
+- Mount persistent storage for profiles and set `LIBRESTREAM_PROFILE_DIR`.
 - Leave `LIBRESTREAM_DEV_IDENTITY` unset.
 - Preserve Jellyfin and its routes.
 
 The app does not validate OIDC tokens itself. Trusting identity headers is safe only when network routing prevents bypassing the authentication proxy. No production manifests have been changed for this branch.
 
+## Profiles
+
+Watchlist, resume points, appearance and addon choices are stored on the server, one JSON file per Authentik identity, named by the SHA-256 of `X-Authentik-Uid`. A person sees the same profile on every device. The browser keeps a cache so playback reads a resume point without waiting on the network; writes are coalesced and retried.
+
+Set `LIBRESTREAM_PROFILE_DIR` to a directory on persistent storage. It must survive pod restarts, or profiles are lost. Files are created `0600` in a `0700` directory.
+
+`GET /api/profile` returns the profile. `PATCH /api/profile` accepts `saved` (an array), `progress`, `preferences` and `addons` (`{disabled, order}`, holding stable addon ids, never array positions), plus `baseRev` for the saved list. Progress merges per title. A saved-list removal is honoured only when the device sends the current `baseRev`, so a stale device cannot delete another device's additions. Writes are rate limited per account.
+
 ## Validation
 
 Current status: local Astryx review build. The forced-CORS video bug is fixed and a real PenguPlay MP4 played in the browser. Sampled AIOStreams links still redirect to Authentik HTML, so publication remains held. See VALIDATION.md for observed facts and remaining checks.
 
-`npm test` tests authentication failure, identity isolation, JSON escaping, registry redaction, fixed upstream routing, search encoding, failed-source isolation, uncached stream responses and static serving. Browser checks and limitations are recorded in `VALIDATION.md`.
+`npm test` tests authentication failure, identity isolation, JSON escaping, registry redaction, fixed upstream routing, search encoding, failed-source isolation, uncached stream responses, profile storage and static serving. Browser checks and limitations are recorded in `VALIDATION.md`.
 
 `tests/preview-fixture.mjs` is explicit integration test data. It uses a local copy of the Big Buck Bunny trailer, credited to Blender Foundation, CC BY 3.0, obtained from https://media.w3.org/2010/05/bunny/trailer.mp4. Put that file at `build/test-video.mp4` after building, then run `node tests/preview-fixture.mjs` and open http://127.0.0.1:4174. It is not a live provider result and is never added to the production registry.
 
