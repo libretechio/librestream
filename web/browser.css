@@ -1689,6 +1689,21 @@ body {
   background: var(--ls-glass);
 }
 
+.ls-addon-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ls-1);
+  flex: 0 0 auto;
+}
+
+.ls-addon.is-disabled {
+  opacity: 0.6;
+}
+
+.ls-addon.is-disabled b {
+  color: var(--ls-ink-2);
+}
+
 .ls-addon b {
   display: block;
   font-size: var(--ls-t-sm);

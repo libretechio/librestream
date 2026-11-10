@@ -5,6 +5,8 @@ import {
   Clapperboard,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
+  ChevronDown,
   RotateCw,
   Play,
   Search as SearchIcon
@@ -26,6 +28,7 @@ import {
 } from './Icons.jsx';
 import { DEFAULT_PREFERENCES, PALETTES, applyPaletteToDOM } from './palettes.js';
 import { api, resource, supports, dedupe, safeURL, readState, writeState } from './api';
+import { loadProfile, applyAddonConfig, saveAddonConfig, flushNow } from './profile.js';
 import { ensureConnectionProfile, warmTitle, rankingKey } from './connection.js';
 import {
   posterMetaLine,
@@ -854,6 +857,8 @@ function EpisodePage({ episode, showTitle, addons, onPlayStream, onBack, onChoos
 export function App({ onThemeChange }) {
   const [user, setUser] = useState(null);
   const [addons, setAddons] = useState(null);
+  const [registry, setRegistry] = useState([]);
+  const [addonConfig, setAddonConfig] = useState({ disabled: [], order: [] });
   const [addonsLoading, setAddonsLoading] = useState(true);
   const [error, setError] = useState('');
   const [route, setRoute] = useState(location.hash.slice(1) || 'home');
@@ -891,12 +896,22 @@ export function App({ onThemeChange }) {
     try {
       const me = await api('/api/me');
       setUser(me);
-      setSaved(readState(me.id, 'saved', []));
-      setProgress(readState(me.id, 'progress', {}));
-      const savedPrefs = { ...DEFAULT_PREFERENCES, ...readState(me.id, 'preferences', DEFAULT_PREFERENCES) };
+      // The profile lives on the server, keyed to the Authentik account, so the
+      // same watchlist and resume points appear on every device.
+      const profile = await loadProfile(me.id);
+      setSaved(profile.saved || readState(me.id, 'saved', []));
+      setProgress(profile.progress || readState(me.id, 'progress', {}));
+      const savedPrefs = {
+        ...DEFAULT_PREFERENCES,
+        ...(profile.preferences && Object.keys(profile.preferences).length
+          ? profile.preferences
+          : readState(me.id, 'preferences', DEFAULT_PREFERENCES))
+      };
       setPreferences(savedPrefs);
       applyPaletteToDOM(savedPrefs);
       onThemeChange?.(savedPrefs);
+      const config = profile.addons || { disabled: [], order: [] };
+      setAddonConfig(config);
 
       setAddons(null);
       const response = await fetch('/api/addons?live=1', { credentials: 'same-origin' });
@@ -914,7 +929,8 @@ export function App({ onThemeChange }) {
           buffer = buffer.slice(end + 1);
           if (line) {
             found.push(JSON.parse(line));
-            setAddons([...found].sort((a, b) => a.index - b.index));
+            setRegistry([...found].sort((a, b) => a.index - b.index));
+            setAddons(applyAddonConfig(found, config));
           }
         }
         if (done) break;
@@ -928,13 +944,21 @@ export function App({ onThemeChange }) {
 
   useEffect(() => {
     boot();
+    const flush = () => flushNow();
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flushNow();
+    });
     const handleHash = () => {
       setRoute(location.hash.slice(1) || 'home');
       setItem(null);
       setEpisode(null);
     };
     window.addEventListener('hashchange', handleHash);
-    return () => window.removeEventListener('hashchange', handleHash);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      window.removeEventListener('hashchange', handleHash);
+    };
   }, []);
 
   const handleApplyPreferences = (next) => {
@@ -947,6 +971,31 @@ export function App({ onThemeChange }) {
       localStorage.setItem('librestream:active_font', next.font || 'graphite');
       if (user?.id) writeState(user.id, 'preferences', next);
     } catch {}
+  };
+
+  const toggleAddon = (id) => {
+    const disabled = addonConfig.disabled.includes(id)
+      ? addonConfig.disabled.filter((entry) => entry !== id)
+      : [...addonConfig.disabled, id];
+    const next = { ...addonConfig, disabled };
+    setAddonConfig(next);
+    saveAddonConfig(next);
+    setAddons(applyAddonConfig(registry, next));
+  };
+
+  // Order is this profile's own; ids the profile has never seen follow in
+  // registry order.
+  const moveAddon = (id, delta) => {
+    const order = addonConfig.order.length ? [...addonConfig.order] : registry.map((addon) => addon.id);
+    for (const other of registry) if (!order.includes(other.id)) order.push(other.id);
+    const from = order.indexOf(id);
+    const to = from + delta;
+    if (from === -1 || to < 0 || to >= order.length) return;
+    order.splice(to, 0, order.splice(from, 1)[0]);
+    const next = { ...addonConfig, order };
+    setAddonConfig(next);
+    saveAddonConfig(next);
+    setAddons(applyAddonConfig(registry, next));
   };
 
   const toggleSave = (meta) => {
@@ -1145,7 +1194,7 @@ export function App({ onThemeChange }) {
                 <div className="ls-profile-avatar">{(user?.name || 'L').slice(0, 1).toUpperCase()}</div>
                 <div>
                   <b>{user?.name || 'Signed in'}</b>
-                  <span>Authentik identity. Watchlist, resume points and appearance are stored in this browser for your account.</span>
+                  <span>Authentik identity. Watchlist, resume points, appearance and addon choices are kept on this server for your account, so they follow you to any device.</span>
                 </div>
               </div>
 
@@ -1154,23 +1203,26 @@ export function App({ onThemeChange }) {
               <div>
                 <div className="ls-shelf-head">
                   <h2 className="ls-shelf-title">Addons</h2>
-                  <span className="ls-shelf-sub">{addons.length} configured</span>
+                  <span className="ls-shelf-sub">
+                    {addons.length} of {registry.length} on
+                  </span>
                   <Button
                     variant="secondary"
                     size="sm"
                     icon={<RotateCw size={14} />}
                     label="Refresh"
-                    onClick={async () => setAddons(await api('/api/addons'))}
+                    onClick={boot}
                     className="ls-push"
                   />
                 </div>
                 <div className="ls-addons">
-                  {addons.map((addon) => {
+                  {registry.map((addon, position) => {
                     const names = (addon.resources || [])
                       .map((resourceItem) => (typeof resourceItem === 'string' ? resourceItem : resourceItem?.name))
                       .filter(Boolean);
+                    const off = addonConfig.disabled.includes(addon.id);
                     return (
-                      <div key={addon.index} className="ls-addon">
+                      <div key={addon.id || addon.index} className={`ls-addon ${off ? 'is-disabled' : ''}`}>
                         <div style={{ minWidth: 0 }}>
                           <b>{addon.name}</b>
                           <span>
@@ -1178,13 +1230,38 @@ export function App({ onThemeChange }) {
                             {names.length ? ` · ${[...new Set(names)].join(', ')}` : ''}
                           </span>
                         </div>
-                        <span className={`ls-status ${addon.ok ? 'is-ok' : 'is-off'}`}>
-                          {addon.ok ? 'Connected' : 'Offline'}
-                        </span>
+                        <div className="ls-addon-actions">
+                          <span className={`ls-status ${addon.ok ? 'is-ok' : 'is-off'}`}>
+                            {addon.ok ? 'Connected' : 'Offline'}
+                          </span>
+                          <IconButton
+                            icon={<ChevronUp size={14} />}
+                            label={`Move ${addon.name} up`}
+                            onClick={() => moveAddon(addon.id, -1)}
+                            disabled={position === 0}
+                          />
+                          <IconButton
+                            icon={<ChevronDown size={14} />}
+                            label={`Move ${addon.name} down`}
+                            onClick={() => moveAddon(addon.id, 1)}
+                            disabled={position === registry.length - 1}
+                          />
+                          <button
+                            type="button"
+                            className={`ls-chip ${off ? '' : 'is-active'}`}
+                            aria-pressed={!off}
+                            onClick={() => toggleAddon(addon.id)}
+                          >
+                            {off ? 'Off' : 'On'}
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
                 </div>
+                <p className="ls-note ls-note--tight">
+                  Turning an addon off hides it from search, shelves and streams for your account only.
+                </p>
               </div>
             </div>
           </div>

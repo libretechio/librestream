@@ -4,6 +4,7 @@ import { resolve, extname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
+import { createProfileStore } from './profileStore.mjs';
 
 const MIME = {
   '.m3u8': 'application/vnd.apple.mpegurl',
@@ -60,7 +61,37 @@ function decodeText(bytes) {
   }
 }
 
-export function createApp({addons=[], devIdentity=false, fetcher=fetch, root=resolve('build')}={}) {
+const PROFILE_BODY_LIMIT = 256 * 1024;
+
+// Read a JSON body with a hard cap, so a large upload cannot exhaust memory.
+async function readJSON(req) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > PROFILE_BODY_LIMIT) {
+      const error = Error('Profile update too large');
+      error.status = 413;
+      throw error;
+    }
+    chunks.push(chunk);
+  }
+  if (!size) return {};
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    const error = Error('Invalid profile update');
+    error.status = 400;
+    throw error;
+  }
+}
+
+export function addonId(url) {
+  return createHash('sha256').update(url).digest('hex').slice(0, 16);
+}
+
+export function createApp({addons=[], devIdentity=false, fetcher=fetch, root=resolve('build'), profiles}={}) {
+  const profileStore = profiles || createProfileStore({dir: process.env.LIBRESTREAM_PROFILE_DIR || resolve('data/profiles')});
   const cache = new Map();
   const inFlight = new Map();
   const streamHandles = new Map();
@@ -116,6 +147,30 @@ export function createApp({addons=[], devIdentity=false, fetcher=fetch, root=res
       const uid = devIdentity ? 'local-preview' : req.headers['x-authentik-uid'];
       if (!username || !uid) return send(401, {error:'Sign in through Authentik to continue.'});
 
+      // Profiles are the one writable resource: a person's own state, kept on
+      // the server so it follows their account to any device.
+      if (url.pathname === '/api/profile') {
+        if (req.method === 'GET' || req.method === 'HEAD') {
+          return send(200, await profileStore.read(uid));
+        }
+        if (req.method !== 'PATCH' && req.method !== 'PUT') return send(405, {error:'Method not allowed'});
+        // A cross-site form cannot set this type, so this also blocks CSRF.
+        if (!/^application\/json\b/i.test(String(req.headers['content-type'] || ''))) {
+          return send(415, {error:'Send a JSON body'});
+        }
+        const origin = req.headers.origin;
+        if (origin && req.headers.host) {
+          let host;
+          try { host = new URL(origin).host; } catch { host = null; }
+          if (host && host !== req.headers.host) return send(403, {error:'Forbidden'});
+        }
+        try {
+          return send(200, await profileStore.update(uid, await readJSON(req)));
+        } catch (error) {
+          return send(error.status || 400, {error: error.status === 429 ? error.message : 'Profile not saved'});
+        }
+      }
+
       if (req.method !== 'GET' && req.method !== 'HEAD') return send(405, {error:'Method not allowed'});
 
       if (url.pathname === '/api/me') {
@@ -132,6 +187,9 @@ export function createApp({addons=[], devIdentity=false, fetcher=fetch, root=res
             const manifest = await upstream(index, 'manifest.json');
             return {
               index,
+              // Stable across reordering and removals: a profile stores this,
+              // never the array position.
+              id: addonId(a.url),
               name: manifest.name || a.name,
               resources: manifest.resources || [],
               types: manifest.types || [],
@@ -139,7 +197,14 @@ export function createApp({addons=[], devIdentity=false, fetcher=fetch, root=res
               ok: true
             };
           } catch {
-            return { index, name: a.name || 'Addon', resources: [], catalogs: [], ok: false };
+            return {
+              index,
+              id: addonId(a.url),
+              name: a.name || 'Addon',
+              resources: [],
+              catalogs: [],
+              ok: false
+            };
           }
         });
 
@@ -405,8 +470,18 @@ export function createApp({addons=[], devIdentity=false, fetcher=fetch, root=res
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const config = process.env.LIBRESTREAM_ADDONS_FILE;
-  const addons = config ? JSON.parse(await readFile(config, 'utf8')) : [{name:'Cinemeta', url:'https://v3-cinemeta.strem.io/manifest.json'}];
-  for (const a of addons) if (new URL(a.url).protocol !== 'https:') throw Error('Addon URLs must use HTTPS');
+  const registry = config ? JSON.parse(await readFile(config, 'utf8')) : [{name:'Cinemeta', url:'https://v3-cinemeta.strem.io/manifest.json'}];
+  for (const a of registry) if (new URL(a.url).protocol !== 'https:') throw Error('Addon URLs must use HTTPS');
+  // Retiring an addon from the shared registry without re-encrypting it: list
+  // its ids (the same id /api/addons reports) and it is dropped at startup.
+  const disabled = new Set(
+    String(process.env.LIBRESTREAM_DISABLED_ADDONS || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)
+  );
+  const addons = registry.filter((addon) => !disabled.has(addonId(addon.url)));
+  if (disabled.size) console.log(`LibreStream registry: ${registry.length - addons.length} addon(s) retired by configuration`);
   // Static files sit next to this file, not in the process working directory.
   const root = resolve(fileURLToPath(new URL('.', import.meta.url)), 'build');
   createApp({addons, root, devIdentity:process.env.LIBRESTREAM_DEV_IDENTITY === '1'}).listen(Number(process.env.PORT || 4173), process.env.HOST || '127.0.0.1', () => console.log('LibreStream ready'));
